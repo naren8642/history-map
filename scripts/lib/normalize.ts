@@ -28,8 +28,16 @@ export interface EventRecord {
   e: number;
   /** Date precision — drives display ("c. 1200" vs "18 Jun 1815"). */
   p: Precision;
-  /** P31 "instance of" QID as integer, for iconography. Absent if unknown. */
-  t?: number;
+  /**
+   * Every P31 "instance of" QID on the item.
+   *
+   * Deliberately a list. Items routinely carry several types, and the OPTIONAL
+   * join returns one row per type; keeping only the first made the result
+   * depend on row order, which is not stable. Adding an unrelated OPTIONAL to
+   * the query once moved ~6,400 events between categories because a different
+   * type happened to arrive first. Curation now decides over the whole set.
+   */
+  t?: number[];
   /** Sitelink count — the notability rank. */
   r: number;
 }
@@ -103,9 +111,10 @@ export function emptyStats(): NormalizeStats {
 
 /**
  * Bindings arrive denormalized: OPTIONAL joins on P31/globe/article multiply
- * rows per item, so the same QID appears several times. We keep the first
- * complete sighting and merge nothing — the extra rows differ only in fields
- * we treat as single-valued anyway.
+ * rows per item, so the same QID appears several times. The first complete
+ * sighting establishes the record; subsequent rows are merged for P31 only,
+ * which is genuinely multi-valued. Everything else is single-valued in
+ * practice, so later rows add nothing.
  */
 export function normalize(
   bindings: Binding[],
@@ -124,7 +133,18 @@ export function normalize(
       reject('bad-qid');
       continue;
     }
-    if (seen.has(qid)) continue; // duplicate row from an OPTIONAL join
+    const typeQid = b.type ? qidToInt(b.type.value) : null;
+
+    // Repeat row for an item we already have: harvest any additional type off
+    // it, then move on.
+    const existing = seen.get(qid);
+    if (existing) {
+      if (typeQid) {
+        existing.t ??= [];
+        if (!existing.t.includes(typeQid)) existing.t.push(typeQid);
+      }
+      continue;
+    }
 
     // Defensive: exclude extraterrestrial coordinates. Measured as zero for
     // P585 today, but a Moon landing would otherwise plot into the Pacific.
@@ -155,7 +175,6 @@ export function normalize(
 
     const precision = PRECISION[Number(b.prec?.value)] ?? 'coarse';
     const rank = Number(b.sl?.value);
-    const type = b.type ? qidToInt(b.type.value) : null;
     const title = b.article ? articleTitle(b.article.value) : undefined;
     const description = b.desc?.value?.trim();
 
@@ -171,7 +190,7 @@ export function normalize(
     if (title) rec.w = title;
     // A description identical to the label carries no information.
     if (description && description !== label) rec.d = description;
-    if (type) rec.t = type;
+    if (typeQid) rec.t = [typeQid];
 
     seen.set(qid, rec);
     stats.kept++;

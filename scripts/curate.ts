@@ -62,25 +62,46 @@ async function main(): Promise<void> {
   let untyped = 0;
 
   for (const e of raw) {
-    if (e.t === undefined) {
+    const types = e.t ?? [];
+    if (types.length === 0) {
       untyped++;
       continue;
     }
-    const category = ALLOWED.get(e.t);
-    if (category) {
+
+    /*
+     * Decide over *all* of an item's types rather than one arbitrary type.
+     *
+     * Inclusion wins over exclusion: "2016 Munich shooting" is both a
+     * `hate crime` (unreviewed) and a `mass shooting` (allowed), and dropping
+     * it because one of its types is unrecognised would be wrong. A type on the
+     * allowlist is positive evidence; the absence of one is not evidence of
+     * anything.
+     */
+    const matched = types.find((t) => ALLOWED.has(t));
+    if (matched !== undefined) {
+      const category = ALLOWED.get(matched)!;
       kept.push({ ...e, g: category });
       byCategory.set(category, (byCategory.get(category) ?? 0) + 1);
       continue;
     }
-    if (DELIBERATELY_EXCLUDED.has(e.t)) {
+
+    if (types.some((t) => DELIBERATELY_EXCLUDED.has(t))) {
       excludedKnown++;
       continue;
     }
-    const c = candidates.get(e.t) ?? { count: 0, notable: 0, sample: e.n };
-    c.count++;
-    if (e.r >= 10) c.notable++;
-    candidates.set(e.t, c);
+
+    // Nothing recognised either way. Report every unreviewed type it carries,
+    // so the expansion list reflects real coverage gaps.
+    for (const t of types) {
+      const c = candidates.get(t) ?? { count: 0, notable: 0, sample: e.n };
+      c.count++;
+      if (e.r >= 10) c.notable++;
+      candidates.set(t, c);
+    }
   }
+
+  const unreviewedEvents =
+    raw.length - kept.length - excludedKnown - untyped;
 
   kept.sort((a, b) => b.r - a.r);
   const json = JSON.stringify(kept);
@@ -93,7 +114,7 @@ async function main(): Promise<void> {
   input            ${raw.length.toLocaleString()} events
   kept             ${kept.length.toLocaleString()} (${pct(kept.length)})
   excluded (known) ${excludedKnown.toLocaleString()} (${pct(excludedKnown)})
-  unreviewed       ${[...candidates.values()].reduce((s, c) => s + c.count, 0).toLocaleString()} across ${candidates.size} types
+  unreviewed       ${unreviewedEvents.toLocaleString()} events across ${candidates.size} types
   untyped (no P31) ${untyped.toLocaleString()}
   raw              ${(json.length / 1024 / 1024).toFixed(2)} MB
   gzipped          ${(gzipSync(Buffer.from(json)).length / 1024 / 1024).toFixed(2)} MB`);

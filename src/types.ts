@@ -41,8 +41,8 @@ export interface HistoryEvent {
   e: number;
   /** Date precision — governs how the date may honestly be displayed. */
   p: Precision;
-  /** P31 type QID. */
-  t?: number;
+  /** Every P31 "instance of" QID on the item. Multi-valued; see normalize.ts. */
+  t?: number[];
   /** Sitelink count, used as the notability rank. */
   r: number;
   /** Curated category. */
