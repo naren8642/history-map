@@ -1,0 +1,288 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import * as maplibregl from 'maplibre-gl';
+import type { GeoJSON } from 'geojson';
+import {
+  buildIndex,
+  clusterLeaves,
+  indexDepthFor,
+  isCluster,
+  isCoLocated,
+  type AnyFeature,
+} from './lib/clustering.ts';
+import { rankFloor } from './lib/rank.ts';
+import { CATEGORY_COLOR, type Category, type HistoryEvent } from './types.ts';
+
+/**
+ * Keyless vector basemap, which keeps the static-deploy property intact.
+ * Positron is deliberately desaturated so the pins carry all the colour.
+ * Fallback if this ever changes terms: https://tiles.openfreemap.org/styles/positron
+ */
+const BASEMAP = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json';
+
+const SOURCE = 'events';
+
+const INITIAL_ZOOM = 1.6;
+
+interface Props {
+  events: HistoryEvent[];
+  onSelect: (qid: number | null) => void;
+  /** Co-located events that no zoom level can separate; opens a list instead. */
+  onSelectGroup: (qids: number[]) => void;
+  onViewportChange: (visible: number, zoom: number) => void;
+}
+
+/** Build a MapLibre expression mapping the category property to its colour. */
+function categoryColorExpression(prop: string): maplibregl.ExpressionSpecification {
+  const cases = Object.entries(CATEGORY_COLOR).flatMap(([category, color]) => [category, color]);
+  return ['match', ['get', prop], ...cases, CATEGORY_COLOR.other] as unknown as maplibregl.ExpressionSpecification;
+}
+
+export function MapView({ events, onSelect, onSelectGroup, onViewportChange }: Props) {
+  const container = useRef<HTMLDivElement | null>(null);
+  const map = useRef<maplibregl.Map | null>(null);
+  const [ready, setReady] = useState(false);
+
+  /**
+   * Indexed over every event in the window, deliberately including ones below
+   * the display floor.
+   *
+   * Filtering by rank *before* indexing is ~13x cheaper at world zoom (600
+   * events, 7ms, versus 19,668 events at 90ms) — but it makes cluster counts
+   * report only notable events, which collapsed Europe's 1900-1950 bubble from
+   * 472 to 16 and destroyed the density signal the map exists to convey.
+   *
+   * So the whole window is indexed and the floor is applied to individual
+   * points afterwards, per §6: the floor hides *pins*, never clusters. The
+   * scrub cost this reintroduces is absorbed by useDeferredValue in App.
+   */
+  // Index depth tracks the map's zoom band; see indexDepthFor. Mirrored in a
+  // ref so the move handler can compare without being rebuilt each time.
+  const [indexDepth, setIndexDepth] = useState(() => indexDepthFor(INITIAL_ZOOM));
+  const depthRef = useRef(indexDepth);
+
+  const index = useMemo(() => buildIndex(events, indexDepth), [events, indexDepth]);
+
+  // Initialise the map exactly once; React state never drives the camera.
+  useEffect(() => {
+    if (map.current || !container.current) return;
+
+    const m = new maplibregl.Map({
+      container: container.current,
+      style: BASEMAP,
+      center: [10, 30],
+      zoom: INITIAL_ZOOM,
+      minZoom: 1,
+      maxZoom: 16,
+      attributionControl: { compact: true },
+    });
+    m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    map.current = m;
+
+    // MapLibre reports tile, sprite, and glyph failures through this event and
+    // nowhere else. Without a listener they vanish silently and the map simply
+    // never finishes loading, which is very hard to diagnose from the outside.
+    m.on('error', (e) => {
+      console.error('[maplibre]', e.error?.message ?? e);
+    });
+
+    // MapLibre measures the container once at construction. In a flex/absolute
+    // layout that can happen before the browser has settled the final size,
+    // leaving a small canvas inside a large div. Observing the container keeps
+    // the canvas correct through both first paint and window resizes.
+    const resizeObserver = new ResizeObserver(() => m.resize());
+    resizeObserver.observe(container.current);
+
+    if (import.meta.env.DEV) {
+      (window as unknown as { __map?: maplibregl.Map }).__map = m;
+    }
+
+    m.on('load', () => {
+      // Vite injects CSS asynchronously in dev, so the container can still be
+      // 0x0 when the Map is constructed — MapLibre then falls back to a 400x300
+      // canvas and keeps it. ResizeObserver cannot be relied on to correct this
+      // (its callbacks are delivered through the rendering pipeline, which is
+      // idle in a hidden tab), so resize explicitly once layout has settled.
+      m.resize();
+
+      m.addSource(SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+
+      m.addLayer({
+        id: 'clusters',
+        type: 'circle',
+        source: SOURCE,
+        filter: ['==', ['get', 'cluster'], true],
+        paint: {
+          'circle-color': categoryColorExpression('topCategory'),
+          'circle-opacity': 0.82,
+          'circle-radius': [
+            'interpolate', ['linear'], ['get', 'point_count'],
+            2, 13, 25, 20, 200, 28, 2000, 38,
+          ],
+          'circle-stroke-width': 1.5,
+          'circle-stroke-color': '#ffffff',
+        },
+      });
+
+      m.addLayer({
+        id: 'cluster-count',
+        type: 'symbol',
+        source: SOURCE,
+        filter: ['==', ['get', 'cluster'], true],
+        layout: {
+          'text-field': ['to-string', ['get', 'point_count_abbreviated']],
+          'text-font': ['Open Sans Semibold'],
+          'text-size': 12,
+          'text-allow-overlap': true,
+        },
+        paint: { 'text-color': '#ffffff' },
+      });
+
+      m.addLayer({
+        id: 'points',
+        type: 'circle',
+        source: SOURCE,
+        filter: ['!=', ['get', 'cluster'], true],
+        paint: {
+          'circle-color': categoryColorExpression('g'),
+          // Size by notability so the eye lands on what matters.
+          'circle-radius': [
+            'interpolate', ['linear'], ['get', 'r'],
+            0, 4, 10, 6, 40, 9, 100, 13,
+          ],
+          'circle-opacity': 0.9,
+          'circle-stroke-width': 1.2,
+          'circle-stroke-color': '#ffffff',
+        },
+      });
+
+      // Label only the most notable points, so the map stays readable.
+      m.addLayer({
+        id: 'point-labels',
+        type: 'symbol',
+        source: SOURCE,
+        filter: ['all', ['!=', ['get', 'cluster'], true], ['>=', ['get', 'r'], 25]],
+        layout: {
+          'text-field': ['get', 'n'],
+          'text-font': ['Open Sans Regular'],
+          'text-size': 11,
+          'text-offset': [0, 1.2],
+          'text-anchor': 'top',
+          'text-max-width': 11,
+        },
+        paint: {
+          'text-color': '#2a2a2a',
+          'text-halo-color': '#ffffff',
+          'text-halo-width': 1.4,
+        },
+      });
+
+      setReady(true);
+    });
+
+    return () => {
+      resizeObserver.disconnect();
+      m.remove();
+      map.current = null;
+      setReady(false);
+    };
+  }, []);
+
+  // Recompute clusters for the current viewport. Supercluster is fast enough to
+  // run synchronously on every move — the whole corpus is already in memory,
+  // which is the payoff of the baked-dataset architecture.
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready) return;
+
+    const refresh = (): void => {
+      const zoom = m.getZoom();
+      const bounds = m.getBounds();
+      const bbox: [number, number, number, number] = [
+        Math.max(bounds.getWest(), -180),
+        Math.max(bounds.getSouth(), -85),
+        Math.min(bounds.getEast(), 180),
+        Math.min(bounds.getNorth(), 85),
+      ];
+
+      const nextDepth = indexDepthFor(zoom);
+      if (nextDepth !== depthRef.current) {
+        depthRef.current = nextDepth;
+        setIndexDepth(nextDepth);
+      }
+
+      const floor = rankFloor(zoom);
+      const clustered = index.getClusters(bbox, Math.round(zoom)) as AnyFeature[];
+
+      // A cluster always survives: hiding it would erase the count that tells
+      // the user something here is worth zooming into. Only bare points below
+      // the floor are dropped.
+      const features = clustered.filter((f) => isCluster(f) || f.properties.r >= floor);
+
+      const source = m.getSource(SOURCE) as maplibregl.GeoJSONSource | undefined;
+      if (!source) return;
+      source.setData({ type: 'FeatureCollection', features } as GeoJSON);
+
+      onViewportChange(features.length, zoom);
+    };
+
+    refresh();
+    m.on('move', refresh);
+    return () => {
+      m.off('move', refresh);
+    };
+  }, [ready, index, onViewportChange]);
+
+  // Interaction: clusters zoom in, points select.
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready) return;
+
+    const onClusterClick = (e: maplibregl.MapMouseEvent): void => {
+      const feature = m.queryRenderedFeatures(e.point, { layers: ['clusters'] })[0];
+      if (!feature) return;
+      const clusterId = feature.properties?.['cluster_id'] as number;
+
+      // Zooming is the normal response, but it is useless when the members
+      // share one coordinate — that cluster would follow the camera forever
+      // and its contents would stay unreachable. List them instead.
+      const leaves = clusterLeaves(index, clusterId);
+      if (isCoLocated(leaves)) {
+        onSelectGroup(leaves.map((l) => l.properties.q));
+        return;
+      }
+
+      const expansion = index.getClusterExpansionZoom(clusterId);
+      m.easeTo({
+        center: (feature.geometry as GeoJSON.Point).coordinates as [number, number],
+        zoom: Math.min(expansion, 16),
+        duration: 450,
+      });
+    };
+
+    const onPointClick = (e: maplibregl.MapMouseEvent): void => {
+      const feature = m.queryRenderedFeatures(e.point, { layers: ['points'] })[0];
+      if (feature) onSelect(feature.properties?.['q'] as number);
+    };
+
+    const pointer = () => { m.getCanvas().style.cursor = 'pointer'; };
+    const reset = () => { m.getCanvas().style.cursor = ''; };
+
+    m.on('click', 'clusters', onClusterClick);
+    m.on('click', 'points', onPointClick);
+    for (const layer of ['clusters', 'points'] as const) {
+      m.on('mouseenter', layer, pointer);
+      m.on('mouseleave', layer, reset);
+    }
+
+    return () => {
+      m.off('click', 'clusters', onClusterClick);
+      m.off('click', 'points', onPointClick);
+      for (const layer of ['clusters', 'points'] as const) {
+        m.off('mouseenter', layer, pointer);
+        m.off('mouseleave', layer, reset);
+      }
+    };
+  }, [ready, index, onSelect, onSelectGroup]);
+
+  return <div ref={container} className="map" />;
+}
