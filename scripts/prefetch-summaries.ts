@@ -24,12 +24,21 @@ const OUT_DIR = 'public/data/summaries';
 const USER_AGENT = 'history-map-prefetch/0.1 (https://github.com/naren/history-map; naren.salem@gmail.com)';
 
 /**
- * Wikimedia's REST guidance tolerates far more than this; the cap is set low
- * deliberately, since a build script has no reason to be aggressive.
+ * Concurrency is low on purpose.
+ *
+ * A first run at 6 workers looked fine against a small sample — top-ranked
+ * articles are warm in the CDN edge cache and returned at ~150/s. Across the
+ * full set most requests are cache misses that reach origin, and Wikimedia
+ * rate-limited hard: 5,236 of 15,758 failed with HTTP 429. Sampling popular
+ * pages tells you nothing about the throughput of the long tail.
  */
-const CONCURRENCY = 6;
+const CONCURRENCY = 2;
+/** Spacing per worker, on top of the concurrency cap. */
+const REQUEST_GAP_MS = 120;
 const DEFAULT_TOP = 2000;
-const MAX_ATTEMPTS = 3;
+/** 429s need real backoff, not the ~1s the first version used. */
+const MAX_ATTEMPTS = 5;
+const BASE_BACKOFF_MS = 2000;
 
 /** Extracts run long; trimming keeps the store small without losing the gist. */
 const MAX_EXTRACT_CHARS = 600;
@@ -62,7 +71,14 @@ async function fetchSummary(
 
       if (res.status === 429 || res.status >= 500) {
         if (attempt < MAX_ATTEMPTS) {
-          await sleep(2 ** attempt * 500);
+          // Honour Retry-After when offered; otherwise exponential backoff with
+          // jitter, so parallel workers do not retry in lockstep and re-trigger
+          // the same limit together.
+          const retryAfter = Number(res.headers.get('retry-after'));
+          const wait = Number.isFinite(retryAfter) && retryAfter > 0
+            ? retryAfter * 1000
+            : BASE_BACKOFF_MS * 2 ** (attempt - 1) * (1 + Math.random());
+          await sleep(wait);
           continue;
         }
         return { outcome: 'failed', detail: `HTTP ${res.status}` };
@@ -94,7 +110,7 @@ async function fetchSummary(
       return { outcome: 'ok', summary };
     } catch (err) {
       if (attempt < MAX_ATTEMPTS) {
-        await sleep(2 ** attempt * 500);
+        await sleep(BASE_BACKOFF_MS * 2 ** (attempt - 1));
         continue;
       }
       return { outcome: 'failed', detail: err instanceof Error ? err.message : String(err) };
@@ -116,26 +132,51 @@ async function pool<T>(items: T[], limit: number, worker: (item: T, i: number) =
   await Promise.all(runners);
 }
 
+/**
+ * Read any store already on disk, so a re-run tops up the gaps rather than
+ * refetching everything. Without this, recovering from a partial run means
+ * discarding thousands of good responses and provoking the same rate limit.
+ */
+async function loadExisting(): Promise<Map<number, BakedSummary>> {
+  const out = new Map<number, BakedSummary>();
+  for (let i = 0; i < SHARD_COUNT; i++) {
+    try {
+      const list = JSON.parse(await readFile(`${OUT_DIR}/${i}.json`, 'utf8')) as BakedSummary[];
+      for (const s of list) out.set(s.q, s);
+    } catch {
+      // Missing shard just means nothing baked for it yet.
+    }
+  }
+  return out;
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const topIdx = argv.indexOf('--top');
   const all = argv.includes('--all');
+  const force = argv.includes('--force');
   const top = topIdx >= 0 ? Number(argv[topIdx + 1]) : DEFAULT_TOP;
 
   const events: EventRecord[] = JSON.parse(await readFile(IN, 'utf8'));
+  const existing = force ? new Map<number, BakedSummary>() : await loadExisting();
 
   // Only events with an article can have a summary at all.
-  const candidates = events
+  const wanted = events
     .filter((e) => e.w)
     .sort((a, b) => b.r - a.r)
     .slice(0, all ? undefined : top);
 
+  const candidates = wanted.filter((e) => !existing.has(e.q));
+
   console.log(
-    `prefetch: ${candidates.length.toLocaleString()} of ${events.length.toLocaleString()} events ` +
-      `(${events.filter((e) => e.w).length.toLocaleString()} have articles), concurrency ${CONCURRENCY}\n`,
+    `prefetch: ${wanted.length.toLocaleString()} wanted, ` +
+      `${existing.size.toLocaleString()} already baked, ` +
+      `${candidates.length.toLocaleString()} to fetch, concurrency ${CONCURRENCY}\n`,
   );
 
-  const summaries: BakedSummary[] = [];
+  // Start from what is already on disk so a top-up run keeps prior results —
+  // including any synthesized narrative attached to them.
+  const summaries: BakedSummary[] = [...existing.values()];
   const counts: Record<Outcome, number> = {
     ok: 0, missing: 0, disambiguation: 0, mismatch: 0, empty: 0, failed: 0,
   };
@@ -144,6 +185,7 @@ async function main(): Promise<void> {
   let done = 0;
 
   await pool(candidates, CONCURRENCY, async (event) => {
+    await sleep(REQUEST_GAP_MS);
     const { outcome, summary, detail } = await fetchSummary(event);
     counts[outcome]++;
     if (summary) summaries.push(summary);

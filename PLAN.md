@@ -563,3 +563,88 @@ The header states the active mode (`100 years · fixed width, adaptive span`).
 
 Track-click and keyboard navigation both follow the active mode: fraction-space steps in Free,
 year-space steps under a preset.
+
+---
+
+## 16. Milestone 4 findings (detail panel, summaries, co-located events)
+
+Panel with five states, baked summary store, live fallback, CC BY-SA attribution, and the
+co-located event list. All verified in the browser.
+
+### Wikidata descriptions close most of the no-article gap
+
+`schema:description` added to the harvest (+3× query cost, absorbed by adaptive chunking):
+
+| | |
+|---|---|
+| description coverage | **93.7%** (18,395 / 19,627) |
+| events with no English article | 4,465 (22.7%) |
+| ...of those, now carrying a description | **82.0%** — rescued from a blank panel |
+| ...still blank | 803 (4.1% of corpus) |
+
+**Correction to §7 and the milestone 4 plan:** the no-article figure is ~23%, not the 40%
+quoted earlier. 40.5% was measured on the *raw* corpus; curation had already removed junk
+types that disproportionately lacked articles.
+
+Events lacking an English article often have several in other languages — Battle of Stonne
+has 10 sitelinks (fr, it, ru, pl, he…) and none in English. But in the *curated* corpus only
+76 such events carry rank ≥ 5, so a non-English fallback would rescue few. Description was
+the right fix; language fallback stays low priority.
+
+### Non-deterministic categorisation (fixed)
+
+Items carry multiple `P31` types and the OPTIONAL join returns one row each; `normalize` kept
+the first and discarded the rest. Adding an unrelated `?desc` OPTIONAL reordered results and
+moved **~6,400 events between categories**. The defect was not the sports leaking back in —
+it was that curation stopped being reproducible across harvests, which is the one property the
+allowlist depends on. `t` is now `number[]` and curation decides over the whole set, with
+inclusion beating exclusion. Result beats the pre-bug baseline on every axis:
+
+| | before (one type) | after (all types) |
+|---|---|---|
+| kept | 19,668 | **20,410** |
+| correctly excluded | 17,695 | **17,943** |
+| unreviewed | 5,318 | **4,334** |
+
+### Prefetch: a sampling error worth remembering
+
+A 150-event sample ran at **150/s**, and that was extrapolated to "all 15,000 in ~100 seconds".
+The real run took **3,064s and failed 5,236 of 15,758 requests with HTTP 429.**
+
+Top-ranked articles are warm in Wikimedia's CDN edge cache; the long tail is not, and cache
+misses reach origin, which rate-limits hard. **Sampling the most popular items measures the
+cache, not the service.** Compounded by a 1–2s backoff and six workers retrying in lockstep.
+
+Now: concurrency 2, 120ms per-worker spacing, `Retry-After` honoured, exponential backoff with
+jitter over 5 attempts, and — most importantly — **resume**, so a partial run tops up instead
+of refetching and re-triggering the limit. Resume also preserves any `syn` narrative already
+attached to a record.
+
+### Sitelink integrity
+
+`wikibase_item` in the response is checked against the event's QID. Over 15,758 attempts:
+**0 outright 404s, 181 QID mismatches (1.15%)** — e.g. "Boer Wars" (Q1676845) whose sitelink
+resolves to Q6857636. So stale sitelinks are not mainly renamed pages but *ambiguous* ones,
+and without this check we would have baked the wrong article under those events.
+
+### Store shape
+
+Sharded by `qid % 64`, manifest-driven so the client never guesses or probes. At 10,340
+summaries: **5.83 MB raw / 2.01 MB gzipped**, ~93 KB raw / 32 KB gzipped per shard — one
+fetch answers a click and covers many later ones.
+
+`BakedSummary.syn` is reserved for synthesized narrative and is deliberately a **separate
+field** from the Wikipedia extract, so sourced and generated prose stay distinguishable all
+the way to the renderer.
+
+### Co-located events
+
+Cluster click tests whether all members share an **identical** coordinate — not whether the
+expansion zoom is exhausted. Zoom cannot separate points that are not apart. Partial overlap
+resolves itself: a mixed cluster zooms, the stack forms its own cluster further in, and that
+one opens the list. The Capitol's 30 State of the Union addresses are now all reachable.
+
+### Dropped deliberately
+
+§7's `sessionStorage` cache for live results. With the baked store covering everything with an
+article, live fetches are the rare path and a second cache layer earns little.
