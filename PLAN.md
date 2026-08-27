@@ -622,16 +622,25 @@ attached to a record.
 
 ### Sitelink integrity
 
-`wikibase_item` in the response is checked against the event's QID. Over 15,758 attempts:
-**0 outright 404s, 181 QID mismatches (1.15%)** — e.g. "Boer Wars" (Q1676845) whose sitelink
+`wikibase_item` in the response is checked against the event's QID. Across both runs:
+**0 outright 404s, 462 QID mismatches (2.9%)** — and notably the rate is higher in the
+low-ranked tail (5.2%) than at the top (1.15%), so ambiguity tracks obscurity — e.g. "Boer Wars" (Q1676845) whose sitelink
 resolves to Q6857636. So stale sitelinks are not mainly renamed pages but *ambiguous* ones,
 and without this check we would have baked the wrong article under those events.
 
 ### Store shape
 
-Sharded by `qid % 64`, manifest-driven so the client never guesses or probes. At 10,340
-summaries: **5.83 MB raw / 2.01 MB gzipped**, ~93 KB raw / 32 KB gzipped per shard — one
-fetch answers a click and covers many later ones.
+Sharded by `qid % 64`, manifest-driven so the client never guesses or probes.
+
+Final store: **15,473 summaries — 98.2% of articled events, 75.8% of the whole corpus.**
+8.67 MB raw / **2.95 MB gzipped**; ~138 KB raw / **47 KB gzipped per shard**, so one fetch
+answers a click and covers many later ones. 70% carry a thumbnail.
+
+The top-up run under the corrected settings had **zero failures** (5,133 fetched in 1,559s),
+against 5,236 failures in the first attempt.
+
+Combining baked summaries with Wikidata descriptions, **only 959 events (4.7%) have no prose
+at all** — name, date and category only.
 
 `BakedSummary.syn` is reserved for synthesized narrative and is deliberately a **separate
 field** from the Wikipedia extract, so sourced and generated prose stay distinguishable all
