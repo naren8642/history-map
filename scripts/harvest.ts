@@ -27,40 +27,66 @@ const DEFAULT_TO = 2030;
 const ROW_SUSPICION_THRESHOLD = 20_000;
 
 const OUT_DIR = 'data/raw';
-const DEFAULT_OUT = `${OUT_DIR}/p585.json`;
 
-function buildQuery(chunk: Chunk): string {
+/**
+ * Two harvest passes.
+ *
+ * `point` is the original P585 instant-event pass. `span` adds P580/P582
+ * events — wars, sieges, campaigns, occupations — which were entirely absent
+ * before. That absence mattered more than it looked: World War II itself is a
+ * span, so the corpus contained hundreds of its battles and not the war.
+ */
+export type Mode = 'point' | 'span';
+
+const OUT_FILE: Record<Mode, string> = {
+  point: `${OUT_DIR}/p585.json`,
+  span: `${OUT_DIR}/p580.json`,
+};
+
+function buildQuery(chunk: Chunk, mode: Mode): string {
+  // The two passes differ only in which date property anchors the chunk, and
+  // whether an end date is collected. Keeping the rest identical means
+  // normalize.ts needs no knowledge of which pass produced a row.
+  const anchor =
+    mode === 'point'
+      ? `?i p:P585/psv:P585 ?tv .`
+      : `?i p:P580/psv:P580 ?tv .`;
+  const endClause = mode === 'span' ? `  OPTIONAL { ?i wdt:P582 ?endT }` : '';
+
   return `
-SELECT ?i ?iLabel ?coord ?t ?prec ?sl ?type ?article ?globe ?desc WHERE {
-  ?i p:P585/psv:P585 ?tv .
+SELECT ?i ?iLabel ?coord ?t ?prec ?endT ?sl ?type ?article ?globe ?desc ?parent WHERE {
+  ${anchor}
   ?tv wikibase:timeValue ?t ; wikibase:timePrecision ?prec .
   FILTER(?t >= "${yearLiteral(chunk.from)}"^^xsd:dateTime && ?t < "${yearLiteral(chunk.to)}"^^xsd:dateTime)
   ?i wdt:P625 ?coord ; wikibase:sitelinks ?sl .
+${endClause}
   OPTIONAL { ?i p:P625/psv:P625/wikibase:geoGlobe ?globe }
   OPTIONAL { ?i wdt:P31 ?type }
   OPTIONAL { ?article schema:about ?i ; schema:isPartOf <https://en.wikipedia.org/> }
   OPTIONAL { ?i schema:description ?desc FILTER(lang(?desc) = "en") }
+  OPTIONAL { ?i wdt:P361 ?parent }
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en" }
 }`.trim();
 }
 
-function parseArgs(argv: string[]): { from: number; to: number; out: string } {
+function parseArgs(argv: string[]): { from: number; to: number; out: string; mode: Mode } {
   const get = (flag: string) => {
     const i = argv.indexOf(flag);
     return i >= 0 && argv[i + 1] !== undefined ? Number(argv[i + 1]) : undefined;
   };
   const from = get('--from') ?? DEFAULT_FROM;
   const to = get('--to') ?? DEFAULT_TO;
+  const mode: Mode = argv.includes('--span') ? 'span' : 'point';
   const outIdx = argv.indexOf('--out');
-  const out = outIdx >= 0 ? (argv[outIdx + 1] ?? DEFAULT_OUT) : DEFAULT_OUT;
+  const out = outIdx >= 0 ? (argv[outIdx + 1] ?? OUT_FILE[mode]) : OUT_FILE[mode];
   if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) {
     throw new Error(`bad range: --from ${from} --to ${to}`);
   }
-  return { from, to, out };
+  return { from, to, out, mode };
 }
 
 async function main(): Promise<void> {
-  const { from, to, out } = parseArgs(process.argv.slice(2));
+  const { from, to, out, mode } = parseArgs(process.argv.slice(2));
 
   const events = new Map<number, EventRecord>();
   const stats = emptyStats();
@@ -74,7 +100,10 @@ async function main(): Promise<void> {
   let splits = 0;
   const problems: string[] = [];
 
-  console.log(`harvest P585  range ${from}..${to}  seeded ${queue.length} chunks\n`);
+  console.log(
+    `harvest ${mode === 'point' ? 'P585 (instants)' : 'P580/P582 (spans)'}  ` +
+      `range ${from}..${to}  seeded ${queue.length} chunks\n`,
+  );
 
   while (queue.length > 0) {
     const chunk = queue.pop()!;
@@ -83,7 +112,7 @@ async function main(): Promise<void> {
     let bindings;
     try {
       queries++;
-      bindings = await sparql(buildQuery(chunk));
+      bindings = await sparql(buildQuery(chunk, mode));
     } catch (err) {
       const halves = err instanceof SplittableError ? bisect(chunk) : null;
 
@@ -123,6 +152,7 @@ async function main(): Promise<void> {
   }
 
   const records = [...events.values()].sort((a, b) => b.r - a.r);
+  const withParent = records.filter((r) => r.pa && r.pa.length > 0).length;
   const json = JSON.stringify(records);
 
   await mkdir(OUT_DIR, { recursive: true });
@@ -136,6 +166,7 @@ async function main(): Promise<void> {
   elapsed        ${elapsed}s over ${queries} queries (${splits} splits)
   rows seen      ${stats.seen}
   events kept    ${records.length}
+  with parent    ${withParent} (${((withParent / Math.max(records.length, 1)) * 100).toFixed(1)}%)
   rejected       ${JSON.stringify(stats.rejected)}
   bytes/event    ${(json.length / Math.max(records.length, 1)).toFixed(0)}
   raw            ${(json.length / 1024 / 1024).toFixed(2)} MB

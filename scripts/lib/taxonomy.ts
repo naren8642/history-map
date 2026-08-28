@@ -312,6 +312,16 @@ export const DELIBERATELY_EXCLUDED = new Map<number, string>([
   [183366, 'territory'],
   [47461344, 'written work'],
   [3497659, 'articles of association'],
+  // Recurring *series*, distinct from the editions already excluded. These
+  // surface as narratives because their editions are "part of" them.
+  [1955280, 'music competition'],
+  [100707163, 'television franchise'],
+  [1344963, 'world championship'],
+  [60147807, 'automobile racing series'],
+  [349, 'sport'],
+  [27020041, 'sports season'],
+  [15991303, 'sports competition series'],
+  [16510064, 'sporting event'],
 ]);
 
 export const ALLOWED: ReadonlyMap<number, Category> = new Map(

@@ -8,13 +8,16 @@
     "harvest:smoke": "tsx scripts/harvest.ts --from 1800 --to 1850",
     "curate": "tsx scripts/curate.ts",
     "inspect": "tsx scripts/inspect.ts",
-    "data": "npm run harvest && npm run curate && npm run stage && npm run prefetch",
+    "data": "npm run harvest && npm run harvest:span && npm run harvest:polities && npm run narratives && npm run curate && npm run stage && npm run prefetch",
     "typecheck": "tsc --noEmit",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "prefetch": "tsx scripts/prefetch-summaries.ts",
-    "stage": "cp data/raw/p585.curated.json public/data/events.json"
+    "stage": "cp data/raw/p585.curated.json public/data/events.json && cp data/raw/narratives.json public/data/narratives.json",
+    "harvest:span": "tsx scripts/harvest.ts --span",
+    "narratives": "tsx scripts/narratives.ts",
+    "harvest:polities": "tsx scripts/harvest-polities.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

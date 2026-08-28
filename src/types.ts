@@ -45,6 +45,8 @@ export interface HistoryEvent {
   t?: number[];
   /** Sitelink count, used as the notability rank. */
   r: number;
+  /** QIDs of the narratives this event is part of (P361). A DAG, not a tree. */
+  pa?: number[];
   /** Curated category. */
   g: Category;
 }

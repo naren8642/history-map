@@ -273,7 +273,8 @@ map/timeline move; `pushState` only on pin selection.
    determines whether the app feels good**; budget time to iterate on it.
 4. **Detail panel** — Wikipedia hydration, caching, loading states.
 5. **Density work** — clustering, rank floors, overview layer. Only tunable once 2–4 exist.
-6. **Full corpus** — add `P580/P582` and gated `P571`; implement bucket splitting.
+6. **Narrative layer + full corpus** — `P580/P582` spans, `P361` containment, story-first
+   map. See §19; this milestone was redefined after milestone 5.
 7. **Polish** — URL state, keyboard nav, mobile layout, empty/error states.
 
 ---
@@ -791,3 +792,135 @@ retuning a threshold table.
 Two of these three were invisible to every check run so far. The preview pane could confirm
 that 110 features existed; it could not show that they overlapped, nor that their colours
 misrepresented them. **A rendering pipeline needs to be seen rendering.**
+
+---
+
+## 19. Milestone 6, redefined: the narrative layer
+
+**Goal (from the user):** *"I look at Europe in the 1940s and there are hundreds of individual
+events, but what we want is the story of WW2 — showcase the large events that affected the
+course of humanity, and present individual events in the context of the bigger picture."*
+
+### The finding that reframed the milestone
+
+**World War II was not in the corpus at all.** Not filtered out — never harvested. We took only
+`P585` (point in time), and wars carry `P580`/`P582`. The map held hundreds of WWII's battles
+and not the war. Every "bigger picture" object was missing for the same reason.
+
+Measured against Wikidata:
+
+| | |
+|---|---|
+| 1939–46 geolocated events with a `P361` parent | **47.1%** (63.9% among span events) |
+| pointing directly at World War II | **239** |
+| WWII / Pacific War / Eastern Front / Holocaust coordinates | **none — a war is not a point** |
+| WWII sitelink rank | **291**, above any single event in the corpus |
+| containment shape | **a DAG** — the Second Sino-Japanese War is part of both WWII *and* the Pacific War |
+
+### Model: two kinds of object
+
+- **Event** — a point in space and time. What we have.
+- **Narrative** — a *span* in time, a *set* of members, and **no intrinsic location**. Its
+  geography is derived: a convex hull of every event beneath it, plus a centroid to anchor
+  the label.
+
+Narratives cannot be discovered by the harvest queries, which are anchored on `P625`; a
+narrative has no coordinates, so no geo query can reach it. They are instead discovered
+*from their children* — an event names its parents, and `scripts/narratives.ts` resolves that
+set and walks **up** the DAG until it reaches roots.
+
+Resolution uses SPARQL `VALUES` batches, not an aggregate: grouping over all of `P361` times
+out on WDQS, while asking about 200 known QIDs at a time is fast and predictable.
+
+Both the descent (collecting member points) and the depth calculation guard against cycles,
+which do occur in Wikidata, and treat multiple parents as normal rather than exceptional.
+
+### Chosen design
+
+- **Story-first map.** Zoomed out shows narratives; expanding one reveals sub-narratives, then
+  individual events. Events are reached through their context.
+- **Region hulls.** A narrative draws as a soft hull over its members' extent — truthfully
+  showing that WWII spanned Europe, North Africa and the Pacific, rather than pretending it
+  occurred at a centroid in the eastern Mediterranean.
+- **Story bands on the timeline.** Major narratives render as horizontal bars across the years
+  they span, making the shape of history legible and offering a second way to select one.
+
+### Known risk
+
+`P361` coverage is 47% in the WWII era and will be far thinner for antiquity. The story layer
+will be rich for modern conflict and sparse for the Bronze Age, so the map must degrade to the
+event layer gracefully rather than appear broken. Orphan events — the 53% with no parent —
+need a first-class home, not a fallback that looks like an error.
+
+### The Eurocentrism measurement, and what it changed
+
+Asked whether the map would end up Eurocentric, the honest answer was yes. Measured on the
+event corpus:
+
+| region | all events | pre-1500 |
+|---|---|---|
+| Europe | 43.3% | **83.7%** |
+| Africa | 4.8% | 15 events |
+| Lat. America | 4.1% | 5 events |
+| N. America | 21.4% | 3 events |
+| Oceania | 1.9% | 0 |
+
+**A first reading blamed the pipeline and was wrong.** Comparing our counts against raw
+Wikidata suggested we were losing ~95% of the non-European record — but those raw totals were
+inflated by solar eclipses. Like for like, 0–1500 CE with eclipses removed:
+
+```
+Europe      2,581 in Wikidata   1,657 ours   64% captured
+Africa         55 in Wikidata      13 ours   24% captured
+N. America     15 in Wikidata       3 ours   20% captured
+Lat. America   12 in Wikidata       5 ours   42% captured
+```
+
+**81.8% of what Wikidata holds for 0–1500 is European.** We amplify it (24% capture in Africa
+against 64% in Europe) but did not create it. Africa has *fifty-five* geolocated dated events
+for the whole period. Filtering better cannot fix that.
+
+**The record exists — it is just not stored as events.** Every major non-European polity is in
+Wikidata, dated, mostly with coordinates, at ranks rivalling anything in the corpus:
+
+```
+Mongol Empire 142   Inca Empire 135   Gupta Empire 116   Mali Empire  99
+Khmer Empire   82   Aksum        76   Srivijaya    69   Songhai      64
+Kush           63   Cahokia      54   Aztec Empire 44   Benin Empire 44
+```
+
+For scale, Chernobyl is 125 and Waterloo 93. Harvesting only *events* fishes in the one pond
+where the imbalance is worst. So the polities pass serves both goals at once — it is the
+story layer the narrative milestone needs, and it is where non-European history lives.
+
+Result: **pre-1500 Europe falls from 83.7% to 71.1%**, with the Inca Empire, Qing dynasty,
+Indus Valley Civilization, Achaemenid and Sasanian Empires, Cultural Revolution and Korean War
+now present. Still Europe-heavy — that is Wikidata, and the honest response is to say so in
+the UI rather than to pretend otherwise.
+
+### Milestone 6 data layer: results
+
+```
+instants (P585)   43,023 events   30.7% with a P361 parent
+spans (P580/582)  33,943 events   43.6% with a P361 parent
+polities            1,446 items   63.1% with own coordinates
+narratives          2,807         1,251 roots, 1,121 with hulls, max depth 6
+```
+
+World War II now exists, with **1,462 events beneath it**. Also the Cold War (522), French
+Revolution (732), American Civil War (608), Crusades, Vietnam War, Korean War.
+
+Four traps found while building it:
+
+- **`country` (Q6256) admits modern states.** The United States arrived as a "narrative" at
+  rank 427 with the span "1784–1784", outranking every real story node. Dropped, along with
+  `city-state`, which admits Berlin, Vienna, Hong Kong and Macau.
+- **27% of polities have no end date.** The end is left equal to the start and flagged `o`,
+  rather than extended to the present — extending would assert that Cahokia is still going.
+- **Deep time leaks in.** `historical period` includes the Phanerozoic (538 million BCE) and
+  Cenozoic (66 million BCE); one such record would flatten the timeline axis. Anything ending
+  before the domain is dropped, anything merely starting earlier is clipped.
+- **Narratives need curating too.** They are discovered through `P361`, which the event
+  allowlist never touches, so FIFA World Cups and Eurovision arrived as top-ranked story nodes.
+  622 excluded by type; ~35 series editions still leak, which is why the build now prints its
+  top 40 narratives as an explicit review list — the §17 lesson applied again.

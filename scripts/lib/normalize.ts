@@ -40,6 +40,14 @@ export interface EventRecord {
   t?: number[];
   /** Sitelink count — the notability rank. */
   r: number;
+  /**
+   * QIDs this event is `part of` (P361) — the narratives it belongs to.
+   *
+   * Multi-valued and a DAG, not a tree: the Second Sino-Japanese War is part of
+   * both World War II and the Pacific War. Anything consuming this must not
+   * assume a single parent.
+   */
+  pa?: number[];
 }
 
 export type Precision = 'day' | 'month' | 'year' | 'decade' | 'century' | 'millennium' | 'coarse';
@@ -134,14 +142,19 @@ export function normalize(
       continue;
     }
     const typeQid = b.type ? qidToInt(b.type.value) : null;
+    const parentQid = b.parent ? qidToInt(b.parent.value) : null;
 
-    // Repeat row for an item we already have: harvest any additional type off
-    // it, then move on.
+    // Repeat row for an item we already have: harvest any additional type or
+    // parent off it, then move on. Both are genuinely multi-valued.
     const existing = seen.get(qid);
     if (existing) {
       if (typeQid) {
         existing.t ??= [];
         if (!existing.t.includes(typeQid)) existing.t.push(typeQid);
+      }
+      if (parentQid) {
+        existing.pa ??= [];
+        if (!existing.pa.includes(parentQid)) existing.pa.push(parentQid);
       }
       continue;
     }
@@ -165,6 +178,9 @@ export function normalize(
       continue;
     }
 
+    // Span events carry an end; instants do not, and collapse to start === end.
+    const endYear = b.endT ? parseYear(b.endT.value) : null;
+
     const label = b.iLabel?.value?.trim();
     // The label service falls back to the bare QID when no label exists;
     // such an item would render as an unreadable pin.
@@ -183,7 +199,7 @@ export function normalize(
       n: label,
       c: coord,
       s: year,
-      e: year,
+      e: endYear !== null && endYear >= year ? endYear : year,
       p: precision,
       r: Number.isFinite(rank) ? rank : 0,
     };
@@ -191,6 +207,7 @@ export function normalize(
     // A description identical to the label carries no information.
     if (description && description !== label) rec.d = description;
     if (typeQid) rec.t = [typeQid];
+    if (parentQid) rec.pa = [parentQid];
 
     seen.set(qid, rec);
     stats.kept++;
