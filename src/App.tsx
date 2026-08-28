@@ -3,6 +3,13 @@ import { MapView, type MapApi } from './MapView.tsx';
 import { DetailPanel, GroupPanel } from './DetailPanel.tsx';
 import { Timeline, type TimeWindow } from './Timeline.tsx';
 import { useEvents } from './lib/useEvents.ts';
+import { useNarratives } from './lib/useNarratives.ts';
+import {
+  buildNarrativeIndex,
+  eventsUnder,
+  overlapsWindow,
+  type Narrative,
+} from './lib/narratives.ts';
 import { buildTimeScale } from './lib/timescale.ts';
 import {
   CATEGORY_COLOR,
@@ -23,8 +30,21 @@ type Selection =
 /** Opening view: the half-century with the densest, most recognisable coverage. */
 const INITIAL_WINDOW: TimeWindow = { from: 1900, to: 1950 };
 
+/**
+ * How many stories to draw at once.
+ *
+ * 159 root narratives overlap the default window; drawing them all would bury
+ * the map in overlapping hulls. Showing the most notable handful matches how
+ * the event layer already budgets features, and the rest are reachable by
+ * entering the story that contains them.
+ */
+const NARRATIVE_BUDGET = 8;
+
 export function App() {
   const { events, error } = useEvents();
+  const narratives = useNarratives();
+  /** The story currently entered, or null at the top level. */
+  const [story, setStory] = useState<number | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [viewport, setViewport] = useState({ visible: 0, zoom: 1.6, floor: 0 });
   const [window, setWindow] = useState<TimeWindow>(INITIAL_WINDOW);
@@ -48,7 +68,41 @@ export function App() {
     [events, deferredWindow],
   );
 
-  const byQid = useMemo(() => new Map(inWindow.map((e) => [e.q, e])), [inWindow]);
+  const narrativeIndex = useMemo(
+    () => buildNarrativeIndex(narratives ?? [], events ?? []),
+    [narratives, events],
+  );
+
+  const activeStory: Narrative | null =
+    story === null ? null : narrativeIndex.byQid.get(story) ?? null;
+
+  /**
+   * Stories to draw: the children of whatever we are inside, or the roots at
+   * the top level — filtered to the window and capped by notability.
+   */
+  const visibleNarratives = useMemo(() => {
+    const pool = activeStory
+      ? narrativeIndex.childrenOf.get(activeStory.q) ?? []
+      : narrativeIndex.roots;
+    return pool
+      .filter((n) => overlapsWindow(n, deferredWindow.from, deferredWindow.to))
+      .sort((a, b) => b.r - a.r)
+      .slice(0, NARRATIVE_BUDGET);
+  }, [activeStory, narrativeIndex, deferredWindow]);
+
+  /**
+   * Entering a story narrows the map to its members. Its own events plus
+   * everything beneath its sub-stories — the whole subtree, so entering "World
+   * War II" shows the Pacific and Eastern Front battles too, not just the
+   * events wired directly to the top node.
+   */
+  const visibleEvents = useMemo(() => {
+    if (!activeStory) return inWindow;
+    const under = new Set(eventsUnder(narrativeIndex, activeStory.q).map((e) => e.q));
+    return inWindow.filter((e) => under.has(e.q));
+  }, [activeStory, narrativeIndex, inWindow]);
+
+  const byQid = useMemo(() => new Map(visibleEvents.map((e) => [e.q, e])), [visibleEvents]);
 
   const selectedEvent =
     selection?.kind === 'event' ? byQid.get(selection.qid) ?? null : null;
@@ -90,7 +144,10 @@ export function App() {
   return (
     <div className="app">
       <MapView
-        events={inWindow}
+        events={visibleEvents}
+        narratives={visibleNarratives}
+        highlightNarrative={story}
+        onSelectNarrative={setStory}
         onMapApi={handleMapApi}
         onSelect={selectEvent}
         onSelectGroup={selectGroup}
@@ -99,14 +156,22 @@ export function App() {
 
       <header className="panel panel--top">
         <h1>History Map</h1>
+        {activeStory && (
+          <div className="breadcrumb">
+            <button onClick={() => setStory(null)}>‹ All stories</button>
+            <span className="crumb-name">{activeStory.n}</span>
+            {activeStory.d && <span className="muted small crumb-desc">{activeStory.d}</span>}
+          </div>
+        )}
         <p className="muted small">
-          {inWindow.length.toLocaleString()} events in window ·{' '}
+          {visibleEvents.length.toLocaleString()}
+          {activeStory ? ' events in this story · ' : ' events in window · '}
           {viewport.visible.toLocaleString()} shown · zoom {viewport.zoom.toFixed(1)} ·
           floor {viewport.floor}
         </p>
       </header>
 
-      <Legend events={inWindow} />
+      <Legend events={visibleEvents} />
 
       {selection?.kind === 'group' && groupEvents && (
         <GroupPanel

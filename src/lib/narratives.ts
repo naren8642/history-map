@@ -17,6 +17,8 @@
  *     single parent or a unique path to the root.
  */
 
+import type { HistoryEvent } from '../types.ts';
+
 export interface Narrative {
   /** QID integer. */
   q: number;
@@ -49,6 +51,87 @@ export interface Narrative {
   depth: number;
   /** No end date recorded. Render as "1050 – unknown", not a zero-length span. */
   o?: boolean;
+}
+
+/**
+ * Membership resolved on the client.
+ *
+ * The baked file stores each narrative's own parents but not its members —
+ * writing member lists would duplicate the whole event corpus inside the
+ * narrative file. Events already name their parents, so the reverse index is
+ * cheap to build once at load and cheaper to ship.
+ */
+export interface NarrativeIndex {
+  byQid: Map<number, Narrative>;
+  /** Narratives directly contained by a narrative. */
+  childrenOf: Map<number, Narrative[]>;
+  /** Events naming this narrative as a direct parent. */
+  eventsOf: Map<number, HistoryEvent[]>;
+  /** Narratives nothing else contains. */
+  roots: Narrative[];
+}
+
+export function buildNarrativeIndex(
+  narratives: readonly Narrative[],
+  events: readonly HistoryEvent[],
+): NarrativeIndex {
+  const byQid = new Map(narratives.map((n) => [n.q, n]));
+  const childrenOf = new Map<number, Narrative[]>();
+  const eventsOf = new Map<number, HistoryEvent[]>();
+
+  for (const n of narratives) {
+    for (const parent of n.pa ?? []) {
+      if (!byQid.has(parent)) continue;
+      const list = childrenOf.get(parent) ?? [];
+      list.push(n);
+      childrenOf.set(parent, list);
+    }
+  }
+  for (const e of events) {
+    for (const parent of e.pa ?? []) {
+      if (!byQid.has(parent)) continue;
+      const list = eventsOf.get(parent) ?? [];
+      list.push(e);
+      eventsOf.set(parent, list);
+    }
+  }
+
+  const roots = narratives.filter((n) => (n.pa ?? []).every((p) => !byQid.has(p)));
+  return { byQid, childrenOf, eventsOf, roots };
+}
+
+/**
+ * Every event beneath a narrative, following containment down.
+ *
+ * `visiting` is not defensive padding: containment is a DAG with genuine cycles
+ * in Wikidata, and a narrative can be reached by more than one path, so results
+ * are deduplicated by QID as well.
+ */
+export function eventsUnder(
+  index: NarrativeIndex,
+  qid: number,
+  seen = new Map<number, HistoryEvent>(),
+  visiting = new Set<number>(),
+): HistoryEvent[] {
+  if (visiting.has(qid)) return [...seen.values()];
+  visiting.add(qid);
+
+  for (const e of index.eventsOf.get(qid) ?? []) seen.set(e.q, e);
+  for (const child of index.childrenOf.get(qid) ?? []) {
+    eventsUnder(index, child.q, seen, visiting);
+  }
+  visiting.delete(qid);
+  return [...seen.values()];
+}
+
+/** Does a narrative's span overlap the visible window? */
+export const overlapsWindow = (n: Narrative, from: number, to: number): boolean =>
+  n.s < to && n.e >= from;
+
+/** Closed GeoJSON ring for a narrative's hull, or null when it has none. */
+export function hullRing(n: Narrative): [number, number][] | null {
+  if (!n.hull || n.hull.length < 3) return null;
+  return [...n.hull, n.hull[0]!];
 }
 
 /**
