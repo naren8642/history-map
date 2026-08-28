@@ -20,6 +20,7 @@ export type Category =
   | 'natural-disaster'
   | 'accident'
   | 'nuclear'
+  | 'epidemic'
   | 'culture'
   | 'other';
 
@@ -115,6 +116,9 @@ const GROUPS: Record<Category, ReadonlyArray<readonly [number, string]>> = {
     [28966115, 'G7 summit'],
     [7888355, 'United Nations Climate Change Conference'],
     [111161, 'synod'],
+    // Found by scripts/explain.ts: this was dropping the 1884 Berlin
+    // Conference, which partitioned Africa.
+    [18564543, 'international conference'],
     [51645, 'ecumenical council'],
     [1464916, 'declaration of independence'],
     [727002, 'charter'],
@@ -197,6 +201,17 @@ const GROUPS: Record<Category, ReadonlyArray<readonly [number, string]>> = {
     // report: a singleton type holding the corpus's third-ranked event never
     // rose high enough on a volume-ordered list to be noticed.
     [15725976, 'nuclear disaster'],
+  ],
+  /**
+   * Surfaced by the span pass: `disease outbreak` alone carried 193 events
+   * above rank 10, the COVID-19 pandemic among them. Pandemics are major
+   * history and did not fit any existing category — "natural disaster" would
+   * be a stretch for something that is neither.
+   */
+  epidemic: [
+    [3241045, 'disease outbreak'],
+    [12184, 'pandemic'],
+    [44512, 'epidemic'],
   ],
   culture: [[172754, "world's fair"]],
   /**
@@ -312,6 +327,19 @@ export const DELIBERATELY_EXCLUDED = new Map<number, string>([
   [183366, 'territory'],
   [47461344, 'written work'],
   [3497659, 'articles of association'],
+  // Institutions and places that carry P580 and so arrive via the span pass,
+  // but are not events at all.
+  [3918, 'university'],
+  [875538, 'public university'],
+  [45400320, 'open-access publisher'],
+  [28122896, 'rural municipality of Estonia'],
+  [26742250, 'former municipality of Estonia'],
+  [11924610, 'Formula One Grand Prix'],
+  // Handled by the polities pass as narratives; as events they would be
+  // duplicates in the wrong layer.
+  [3024240, 'historical country — belongs to the narrative layer'],
+  [11514315, 'historical period — belongs to the narrative layer'],
+  [839954, 'archaeological site — belongs to the narrative layer'],
   // Recurring *series*, distinct from the editions already excluded. These
   // surface as narratives because their editions are "part of" them.
   [1955280, 'music competition'],
@@ -350,6 +378,7 @@ export const CATEGORIES = Object.keys(GROUPS) as Category[];
  */
 export const CATEGORY_PRECEDENCE: readonly Category[] = [
   'nuclear',
+  'epidemic',
   'atrocity',
   'terrorism',
   'natural-disaster',

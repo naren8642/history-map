@@ -15,6 +15,7 @@ export type Category =
   | 'natural-disaster'
   | 'accident'
   | 'nuclear'
+  | 'epidemic'
   | 'culture'
   | 'other';
 
@@ -60,6 +61,7 @@ export const CATEGORY_COLOR: Record<Category, string> = {
   'natural-disaster': '#2e8b74',
   accident: '#9a7b2f',
   nuclear: '#7a4fa3',
+  epidemic: '#3f7d8c',
   culture: '#4a7c3f',
   other: '#7a7a7a',
 };
@@ -74,6 +76,7 @@ export const CATEGORY_COLOR: Record<Category, string> = {
  */
 export const CATEGORY_TIEBREAK: readonly Category[] = [
   'nuclear',
+  'epidemic',
   'atrocity',
   'terrorism',
   'natural-disaster',
@@ -92,6 +95,7 @@ export const CATEGORY_LABEL: Record<Category, string> = {
   'natural-disaster': 'Natural disaster',
   accident: 'Accident',
   nuclear: 'Nuclear',
+  epidemic: 'Epidemic',
   culture: 'Culture',
   other: 'Other',
 };

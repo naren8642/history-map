@@ -1,0 +1,25 @@
+{
+  "_README": [
+    "Hand-maintained curation overrides, applied by scripts/curate.ts after the",
+    "type allowlist. Use this for one-off judgements; when a whole CLASS of",
+    "events is affected, add its type to scripts/lib/taxonomy.ts instead, so the",
+    "fix applies to everything like it.",
+    "",
+    "Diagnose first:  npm run explain -- \"Berlin Conference\"",
+    "",
+    "  include : force-keep an event the allowlist drops. `g` sets its category.",
+    "  exclude : force-drop an event the allowlist keeps.",
+    "  patch   : correct fields on a harvested event (bad coordinate, poor name).",
+    "  add     : supply an event the harvest cannot reach — typically because",
+    "            Wikidata has no P625 for it. Use the real QID so summaries and",
+    "            narrative links still work; use a negative QID only for",
+    "            something genuinely absent from Wikidata.",
+    "",
+    "Every entry needs a `why`. A year from now the reason is the only thing",
+    "that makes an override reviewable."
+  ],
+  "include": [],
+  "exclude": [],
+  "patch": {},
+  "add": []
+}

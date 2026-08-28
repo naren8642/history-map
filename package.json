@@ -17,7 +17,8 @@
     "stage": "cp data/raw/p585.curated.json public/data/events.json && cp data/raw/narratives.json public/data/narratives.json",
     "harvest:span": "tsx scripts/harvest.ts --span",
     "narratives": "tsx scripts/narratives.ts",
-    "harvest:polities": "tsx scripts/harvest-polities.ts"
+    "harvest:polities": "tsx scripts/harvest-polities.ts",
+    "explain": "tsx scripts/explain.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

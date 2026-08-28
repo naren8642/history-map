@@ -924,3 +924,75 @@ Four traps found while building it:
   allowlist never touches, so FIFA World Cups and Eurovision arrived as top-ranked story nodes.
   622 excluded by type; ~35 series editions still leak, which is why the build now prints its
   top 40 narratives as an explicit review list — the §17 lesson applied again.
+
+---
+
+## 20. Data maintenance and extension
+
+Until now the pipeline could be *run* but not *maintained*: no refresh cadence, no way to see
+what a re-run changed, and no answer to "why isn't X on the map?" other than ad-hoc scripting.
+
+### `npm run explain` — the diagnostic
+
+Traces one item through every stage and reports where it was lost:
+
+```
+npm run explain -- "Berlin Conference"
+npm run explain -- Q1379
+```
+
+It checks Wikidata first (coordinates? date? types? parents? rank?), then each harvest file,
+then curation, then the shipped artefacts, and names the likely cause. This exists because the
+same question kept recurring — the Chernobyl disaster, third-ranked in the corpus, was absent
+for weeks — and each time was answered by hand.
+
+Its first real use found the **1884 Berlin Conference**, which partitioned Africa, being
+dropped for the unrecognised type `international conference`.
+
+### Extending: two routes, and a rule for choosing
+
+**A class of events → fix the taxonomy.** `international conference` was not a one-off; adding
+it to `GROUPS` fixed the Berlin Conference and everything like it. Prefer this route.
+
+**A genuine one-off → `data/manual/curation.json`.**
+
+```jsonc
+{
+  "include": [{ "q": 13582, "g": "politics", "why": "..." }],  // force-keep
+  "exclude": [{ "q": 999,   "why": "..." }],                   // force-drop
+  "patch":   { "1379": { "c": [30.1, 51.4] } },                // fix a field
+  "add":     [ /* events the harvest cannot reach at all */ ]  // e.g. no P625
+}
+```
+
+Every entry requires a `why`; a year later that is the only thing making an override
+reviewable. Use the real QID even for `add`, so summaries and narrative links still resolve.
+
+**The file should stay small.** A large override file means the allowlist is wrong, and
+overrides are invisible to every measurement the pipeline reports.
+
+### Regression diff
+
+`curate` writes a snapshot each run and reports the delta against the previous one: total
+change, and every event above rank 20 that was present before and is gone now.
+
+This exists because **silent loss is this pipeline's characteristic failure**, twice over: a
+truncated HTTP response dropped an entire decade while the run exited 0, and the span pass was
+harvested for a whole milestone before anyone noticed curation never read its file — 33,943
+events collected and discarded. Both were found by accident. Now the build says it out loud.
+
+### Refresh cadence (planned, not yet built)
+
+- **Monthly** `npm run data`. Wikidata churns steadily; the measured sitelink staleness of
+  2.9% is the drift this corrects.
+- **Fail CI on a nonzero harvest `PROBLEMS` count.** Already reported, still not enforced.
+- **Fail CI on unexplained notable losses** from the regression diff.
+- **Surface data age in the UI** — the manifest already carries `generated`.
+
+### Known upkeep costs
+
+- The 286 events whose sitelink fails the QID check are retried every prefetch run (~1 min).
+  Caching negative results would fix it.
+- Both the event allowlist and the narrative exclusions need periodic review as Wikidata adds
+  types. The two review reports (`EXPANSION CANDIDATES`, `MOST NOTABLE DROPPED EVENTS`) and
+  the narrative top-40 list are the intended way to do that, not manual browsing.
