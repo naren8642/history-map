@@ -1019,6 +1019,28 @@ its own drill-down.
 Clicking a cluster no longer zooms. Zoom remains on double-click, scroll, the map controls,
 and the panel's explicit action — but it is no longer the toll for reading something.
 
+### Revised after use: the card is passive
+
+The first version made the card's titles clickable. In practice that failed: leaving the
+cluster fires MapLibre's `mouseleave`, and the card only survived if the pointer crossed the
+18px gap of bare map before a grace period expired. Reaching a title was a race the user had
+to win, and usually lost.
+
+Two structural faults behind it. The card was rendered **inside the container MapLibre owns**,
+so React and MapLibre were both mutating one node's children. And an interactive card must
+capture pointer events, which means it can steal the very hover it depends on.
+
+Now the card is **passive** — `pointer-events: none`, no buttons, ending in "click to open" —
+and lives in a wrapper beside the map rather than inside it. Leaving the cluster closes it
+immediately, with no grace period, because leaving genuinely means leaving.
+
+Nothing is lost: clicking the cluster opens the same list as a real panel, so reaching an
+article is two clicks and no zooming. The card only ever needed to answer *"what is in here?"*.
+
+**The general lesson:** an interactive hover surface has to solve the reach problem, and the
+reach problem has no clean solution when the trigger is a small target on a map. Making the
+surface passive removes the problem instead of managing it.
+
 ### Two details that would have broken it
 
 **`getLeaves` returns tree order, not rank order.** The first five members of a 1,532-event

@@ -24,14 +24,8 @@ const SOURCE = 'events';
 
 const INITIAL_ZOOM = 1.6;
 
-/** Delay before a hover opens the peek, so passing over clusters does not flash cards. */
+/** Delay before a hover opens the peek, so sweeping across clusters does not flash cards. */
 const PEEK_OPEN_MS = 130;
-/**
- * Grace period after the pointer leaves. The card's contents are clickable, so
- * the pointer has to be able to travel from the cluster into the card; closing
- * immediately would make it unreachable.
- */
-const PEEK_CLOSE_MS = 220;
 
 /** Camera actions the surrounding UI needs; the map instance stays private. */
 export interface MapApi {
@@ -337,10 +331,9 @@ export function MapView({ events, onMapApi, onSelect, onSelectGroup, onViewportC
       if (feature) openPeekFor(feature);
     };
 
-    const onClusterOut = (): void => {
-      clearPeekTimers();
-      peekTimers.current.close = window.setTimeout(closePeek, PEEK_CLOSE_MS);
-    };
+    // The card is pointer-transparent, so leaving the cluster genuinely means
+    // leaving — no grace period needed, and none wanted.
+    const onClusterOut = closePeek;
 
     const onClusterClick = (e: maplibregl.MapMouseEvent): void => {
       const feature = m.queryRenderedFeatures(e.point, { layers: ['clusters'] })[0];
@@ -392,33 +385,13 @@ export function MapView({ events, onMapApi, onSelect, onSelectGroup, onViewportC
     };
   }, [ready, index, onSelect, onSelectGroup]);
 
+  // The peek sits outside the container MapLibre owns. React and MapLibre both
+  // mutating one node's children is asking for trouble; the wrapper keeps each
+  // to its own subtree.
   return (
-    <div ref={container} className="map">
-      {peek && (
-        <ClusterPeek
-          peek={peek}
-          onSelect={(qid) => {
-            setPeek(null);
-            peekCluster.current = null;
-            onSelect(qid);
-          }}
-          onOpenAll={() => {
-            const all = peekCluster.current;
-            setPeek(null);
-            peekCluster.current = null;
-            if (all !== null) onSelectGroup(rankedMembers(index, all).map((p) => p.q));
-          }}
-          onPointerEnter={() => {
-            window.clearTimeout(peekTimers.current.close);
-          }}
-          onPointerLeave={() => {
-            peekTimers.current.close = window.setTimeout(() => {
-              peekCluster.current = null;
-              setPeek(null);
-            }, PEEK_CLOSE_MS);
-          }}
-        />
-      )}
+    <div className="map-wrap">
+      <div ref={container} className="map" />
+      {peek && <ClusterPeek peek={peek} />}
     </div>
   );
 }
