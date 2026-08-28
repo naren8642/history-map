@@ -119,16 +119,19 @@ export function DetailPanel({ event, onBack, onClose }: Props) {
 
 interface GroupProps {
   events: HistoryEvent[];
+  /** True when every event shares one exact coordinate, rather than merely being close. */
+  sameCoordinate: boolean;
   onPick: (qid: number) => void;
   onClose: () => void;
 }
 
 /**
- * Events sharing one exact coordinate — a venue or a centroid standing in for
- * many happenings. Without this they are unreachable: clustering keeps them in
- * one bubble at every zoom, because they genuinely are one point.
+ * Events the map cannot pull apart at any available zoom — either sharing one
+ * exact coordinate (a venue or centroid standing in for many happenings) or
+ * close enough that they cluster all the way in. Without this they are simply
+ * unreachable.
  */
-export function GroupPanel({ events, onPick, onClose }: GroupProps) {
+export function GroupPanel({ events, sameCoordinate, onPick, onClose }: GroupProps) {
   const panel = useRef<HTMLElement | null>(null);
   useEffect(() => {
     panel.current?.focus();
@@ -157,7 +160,9 @@ export function GroupPanel({ events, onPick, onClose }: GroupProps) {
       </div>
       <p className="eyebrow">{events.length} events at this location</p>
       <p className="muted small note">
-        These share one coordinate, so the map cannot separate them.
+        {sameCoordinate
+          ? 'These share one coordinate, so the map cannot separate them.'
+          : 'These are too close together for the map to separate at any zoom level.'}
       </p>
       <ul className="group-list">
         {sorted.map((e) => (

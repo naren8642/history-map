@@ -48,6 +48,17 @@ const GROUPS: Record<Category, ReadonlyArray<readonly [number, string]>> = {
     [1384277, 'military expedition'],
     [6539177, 'aircraft shootdown'],
     [467011, 'invasion'],
+    // Third pass, from the rank-weighted dropped-event report:
+    [7883019, 'undeclared war'],
+    [2659056, 'colonial war'],
+    [8465, 'civil war'],
+    [1323212, 'insurgency'],
+    [830494, 'dogfight'],
+    [273976, 'blockade'],
+    [104708121, 'storming'],
+    [6107280, 'revolt'],
+    [23036198, 'hostage-rescue mission'],
+    [194465, 'annexation'],
   ],
   atrocity: [
     [3199915, 'massacre'],
@@ -55,6 +66,9 @@ const GROUPS: Record<Category, ReadonlyArray<readonly [number, string]>> = {
     [177716, 'pogrom'],
     [750215, 'mass murder'],
     [486775, 'lynching'],
+    [66307429, 'place of mass murder'],
+    [17164849, 'police brutality in the United States'],
+    [137909331, 'killing by law enforcement officers'],
   ],
   terrorism: [
     [2223653, 'terrorist attack'],
@@ -80,6 +94,7 @@ const GROUPS: Record<Category, ReadonlyArray<readonly [number, string]>> = {
     [5510053, 'fusillade'],
     [25917186, 'coordinated terrorist attack'],
     [134693479, 'attack on church'],
+    [930164, 'conspiracy'],
   ],
   politics: [
     [131569, 'treaty'],
@@ -100,6 +115,27 @@ const GROUPS: Record<Category, ReadonlyArray<readonly [number, string]>> = {
     [28966115, 'G7 summit'],
     [7888355, 'United Nations Climate Change Conference'],
     [111161, 'synod'],
+    [51645, 'ecumenical council'],
+    [1464916, 'declaration of independence'],
+    [727002, 'charter'],
+    [116741026, 'constitutive treaty'],
+    [9557810, 'bilateral treaty'],
+    [11122, 'treaty of the European Union'],
+    [16567729, 'Council of Europe treaty'],
+    [1414472, 'international human rights instrument'],
+    [1646218, 'international environmental agreement'],
+    [107706, 'armistice'],
+    [7157512, 'peace conference'],
+    [1072326, 'summit'],
+    [625994, 'convention'],
+    [18603729, 'dissolution of an administrative territorial entity'],
+    [1140229, 'political union'],
+    [5791104, 'international crisis'],
+    [1572600, 'proclamation'],
+    [2751586, 'resolution'],
+    [3771738, 'historical document'],
+    [125506609, 'LGBT+ protest'],
+    [85785387, 'migrant crisis'],
   ],
   'natural-disaster': [
     [7944, 'earthquake'],
@@ -111,6 +147,12 @@ const GROUPS: Record<Category, ReadonlyArray<readonly [number, string]>> = {
     [7935, 'avalanche'],
     [60186, 'meteorite'],
     [3839081, 'disaster'],
+    [8070, 'tsunami'],
+    [727990, 'megathrust earthquake'],
+    [7446977, 'off Sanriku earthquake'],
+    [11639848, 'multi-segment earthquake'],
+    [114041309, 'earthquake sequence'],
+    [131136, 'meteor'],
   ],
   accident: [
     [744913, 'aviation accident'],
@@ -140,12 +182,21 @@ const GROUPS: Record<Category, ReadonlyArray<readonly [number, string]>> = {
     [19689353, 'pilot suicide'],
     [30880545, 'sinking'],
     [116673853, 'ground collision'],
+    [977367, 'chemical accident'],
+    [220187, 'oil spill'],
+    [3193890, 'environmental disaster'],
+    [327541, 'arson'],
+    [106955175, 'passenger flight'],
   ],
   nuclear: [
     [210112, 'nuclear weapons testing'],
     [3058675, 'underground nuclear weapons test'],
     [98607365, 'atmospheric nuclear test'],
     [4367188, 'underwater nuclear explosion'],
+    // Chernobyl and Fukushima. Their absence is what prompted the rank-weighted
+    // report: a singleton type holding the corpus's third-ranked event never
+    // rose high enough on a volume-ordered list to be noticed.
+    [15725976, 'nuclear disaster'],
   ],
   culture: [[172754, "world's fair"]],
   /**
@@ -156,6 +207,8 @@ const GROUPS: Record<Category, ReadonlyArray<readonly [number, string]>> = {
   other: [
     [1190554, 'occurrence'],
     [12890393, 'incident'],
+    [13418847, 'historical event'],
+    [11827304, 'historical process'],
   ],
 };
 
@@ -232,6 +285,33 @@ export const DELIBERATELY_EXCLUDED = new Map<number, string>([
   [40728071, 'UFO sighting'],
   [2252077, 'shooting — individual crime'],
   [135976384, 'Summer Olympic Games edition'],
+  // Third pass:
+  [1478437, 'association football competition'],
+  [178750, 'Copa América'],
+  [12708896, 'final of the FIFA World Cup'],
+  [111072137, "edition of the FIFA Women's World Cup"],
+  [80716240, 'UEFA Champions League final'],
+  [14547231, 'international sporting event'],
+  [3327913, 'Summer Paralympic Games'],
+  [138028979, 'Summer Youth Olympic Games edition'],
+  [270163, 'tennis at the Summer Olympics'],
+  [114581, 'ice hockey at the Olympic Games'],
+  [11783626, 'athletics meeting'],
+  [2122052, 'qualification event'],
+  [89031984, 'cancelled music event due to the COVID-19 pandemic'],
+  [3887, 'solar eclipse — astronomical, machine-generated'],
+  [8082, 'Malaysian Grand Prix'],
+  [7980, 'Chinese Grand Prix'],
+  // Objects and abstractions, not events: they appear only as secondary types
+  // on items whose real classification is elsewhere.
+  [42314054, 'ammunition model'],
+  [15142894, 'weapon model'],
+  [176799, 'military unit'],
+  [1406161, 'artistic theme'],
+  [22087155, 'end cause'],
+  [183366, 'territory'],
+  [47461344, 'written work'],
+  [3497659, 'articles of association'],
 ]);
 
 export const ALLOWED: ReadonlyMap<number, Category> = new Map(
@@ -245,3 +325,43 @@ export const TYPE_LABELS: ReadonlyMap<number, string> = new Map(
 );
 
 export const CATEGORIES = Object.keys(GROUPS) as Category[];
+
+/**
+ * Which category wins when an event carries allowlisted types from several.
+ *
+ * Without an explicit order, "first match wins" inherits the order of the
+ * harvest's result rows — the same order-dependence that made categorisation
+ * irreproducible before. It showed up immediately: Chernobyl is both an
+ * `environmental disaster` and a `nuclear disaster`, and landed under
+ * "accident" purely because that row arrived first.
+ *
+ * Ordered most-specific first. The generic containers sit last so that
+ * `incident` or `occurrence` never beats a precise classification.
+ */
+export const CATEGORY_PRECEDENCE: readonly Category[] = [
+  'nuclear',
+  'atrocity',
+  'terrorism',
+  'natural-disaster',
+  'conflict',
+  'accident',
+  'politics',
+  'culture',
+  'other',
+];
+
+/** The winning category among an event's types, or undefined if none match. */
+export function categoryFor(types: readonly number[]): Category | undefined {
+  let best: Category | undefined;
+  let bestRank = Infinity;
+  for (const t of types) {
+    const category = ALLOWED.get(t);
+    if (!category) continue;
+    const rank = CATEGORY_PRECEDENCE.indexOf(category);
+    if (rank >= 0 && rank < bestRank) {
+      best = category;
+      bestRank = rank;
+    }
+  }
+  return best;
+}

@@ -114,16 +114,13 @@ export function clusterLeaves(
 }
 
 /**
- * True when every leaf sits on the identical coordinate.
+ * True when every point sits on the identical coordinate.
  *
- * This — not the expansion zoom — is the right test for "zooming will not help".
- * Coordinates are stored to 4dp, and 160 State of the Union addresses all carry
- * the US Capitol's exact position: no zoom level can ever separate points that
- * are not actually apart, so the click must open a list instead of zooming.
- *
- * Partial overlap resolves itself: a cluster mixing the Capitol stack with
- * nearby events is not co-located, so it zooms; the stack then forms its own
- * cluster further in, and that one opens the list.
+ * Not used to decide whether to open the list — that is governed by whether the
+ * cluster's expansion zoom exceeds the map's maximum, which also catches points
+ * that are merely very close (Chernobyl's reactor and helicopter-crash sites are
+ * ~30m apart and never separate). This only distinguishes the two cases so the
+ * panel can describe them accurately.
  */
 export function isCoLocated(leaves: readonly PointFeature[]): boolean {
   if (leaves.length < 2) return false;

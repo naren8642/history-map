@@ -6,7 +6,6 @@ import {
   clusterLeaves,
   indexDepthFor,
   isCluster,
-  isCoLocated,
   type AnyFeature,
 } from './lib/clustering.ts';
 import { rankFloor } from './lib/rank.ts';
@@ -242,19 +241,30 @@ export function MapView({ events, onSelect, onSelectGroup, onViewportChange }: P
       if (!feature) return;
       const clusterId = feature.properties?.['cluster_id'] as number;
 
-      // Zooming is the normal response, but it is useless when the members
-      // share one coordinate — that cluster would follow the camera forever
-      // and its contents would stay unreachable. List them instead.
-      const leaves = clusterLeaves(index, clusterId);
-      if (isCoLocated(leaves)) {
+      const expansion = index.getClusterExpansionZoom(clusterId);
+
+      /*
+       * Zooming is the normal response, but it cannot always make progress.
+       *
+       * The first version of this test asked whether the members shared an
+       * identical coordinate. Too strict: the Chernobyl disaster and the
+       * Chernobyl Mi-8 helicopter crash sit ~30m apart, which is not identical
+       * but still clusters at maximum zoom — so the click silently did nothing
+       * and one of the two stayed unreachable.
+       *
+       * The honest question is whether any zoom level available on this map
+       * would separate them. If the expansion zoom is beyond maxZoom, none
+       * will, so list them instead.
+       */
+      if (expansion > m.getMaxZoom()) {
+        const leaves = clusterLeaves(index, clusterId);
         onSelectGroup(leaves.map((l) => l.properties.q));
         return;
       }
 
-      const expansion = index.getClusterExpansionZoom(clusterId);
       m.easeTo({
         center: (feature.geometry as GeoJSON.Point).coordinates as [number, number],
-        zoom: Math.min(expansion, 16),
+        zoom: Math.min(expansion, m.getMaxZoom()),
         duration: 450,
       });
     };

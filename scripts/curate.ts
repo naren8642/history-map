@@ -11,7 +11,14 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { gzipSync } from 'node:zlib';
-import { ALLOWED, DELIBERATELY_EXCLUDED, TYPE_LABELS, CATEGORIES, type Category } from './lib/taxonomy.ts';
+import {
+  ALLOWED,
+  CATEGORIES,
+  DELIBERATELY_EXCLUDED,
+  TYPE_LABELS,
+  categoryFor,
+  type Category,
+} from './lib/taxonomy.ts';
 import type { EventRecord } from './lib/normalize.ts';
 
 const IN = process.argv[2] ?? 'data/raw/p585.json';
@@ -19,6 +26,18 @@ const OUT = process.argv[3] ?? 'data/raw/p585.curated.json';
 
 /** How many unreviewed types to surface as expansion candidates. */
 const CANDIDATE_LIMIT = 30;
+
+/**
+ * How many individually-notable dropped events to surface.
+ *
+ * Ranking candidates by type volume answers "which gap is widest?" but not
+ * "what is the most important thing we are losing?". Those are different
+ * questions, and only the second one catches a singleton type holding one
+ * irreplaceable event: the Chernobyl disaster (rank 125, third in the whole
+ * corpus) sat unnoticed under `nuclear disaster` while the volume-ranked list
+ * was topped by Formula One seasons.
+ */
+const DROPPED_EVENT_LIMIT = 20;
 
 /** A curated event carries its category, so the UI can filter and style by it. */
 interface CuratedEvent extends EventRecord {
@@ -55,6 +74,8 @@ async function main(): Promise<void> {
   const raw: EventRecord[] = JSON.parse(await readFile(IN, 'utf8'));
 
   const kept: CuratedEvent[] = [];
+  /** Events dropped for carrying no recognised type — the actionable losses. */
+  const droppedUnreviewed: EventRecord[] = [];
   const byCategory = new Map<Category, number>();
   /** Types not in the allowlist and not explicitly rejected — the to-do list. */
   const candidates = new Map<number, { count: number; notable: number; sample: string }>();
@@ -77,9 +98,8 @@ async function main(): Promise<void> {
      * allowlist is positive evidence; the absence of one is not evidence of
      * anything.
      */
-    const matched = types.find((t) => ALLOWED.has(t));
-    if (matched !== undefined) {
-      const category = ALLOWED.get(matched)!;
+    const category = categoryFor(types);
+    if (category !== undefined) {
       kept.push({ ...e, g: category });
       byCategory.set(category, (byCategory.get(category) ?? 0) + 1);
       continue;
@@ -92,6 +112,7 @@ async function main(): Promise<void> {
 
     // Nothing recognised either way. Report every unreviewed type it carries,
     // so the expansion list reflects real coverage gaps.
+    droppedUnreviewed.push(e);
     for (const t of types) {
       const c = candidates.get(t) ?? { count: 0, notable: 0, sample: e.n };
       c.count++;
@@ -127,6 +148,30 @@ async function main(): Promise<void> {
 
   // The whole point of the allowlist instrumentation: show what we are dropping
   // without having decided to, biggest first, so expansion is evidence-driven.
+  // The rank-weighted view: what are the most notable individual events we are
+  // dropping, and which unrecognised type is responsible for each?
+  const notableLosses = [...droppedUnreviewed]
+    .sort((a, b) => b.r - a.r)
+    .slice(0, DROPPED_EVENT_LIMIT);
+
+  if (notableLosses.length > 0) {
+    const typeQids = [...new Set(notableLosses.flatMap((e) => e.t ?? []))];
+    const labels = await fetchLabels(typeQids);
+    console.log(
+      `\n  MOST NOTABLE DROPPED EVENTS — by sitelink rank` +
+        `\n  (a singleton type holding one major event will not appear in the list below)` +
+        `\n  ${'-'.repeat(66)}`,
+    );
+    console.log(`  ${'rank'.padStart(5)}  ${'year'.padStart(8)}  ${'event'.padEnd(38)} unrecognised type(s)`);
+    for (const e of notableLosses) {
+      const year = e.s < 0 ? `${Math.abs(e.s)} BCE` : String(e.s);
+      const types = (e.t ?? []).map((t) => labels.get(t) ?? `Q${t}`).join(', ');
+      console.log(
+        `  ${String(e.r).padStart(5)}  ${year.padStart(8)}  ${e.n.slice(0, 38).padEnd(38)} ${types.slice(0, 52)}`,
+      );
+    }
+  }
+
   const ranked = [...candidates.entries()]
     .sort((a, b) => b[1].notable - a[1].notable || b[1].count - a[1].count)
     .slice(0, CANDIDATE_LIMIT);

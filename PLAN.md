@@ -657,3 +657,69 @@ one opens the list. The Capitol's 30 State of the Union addresses are now all re
 
 §7's `sessionStorage` cache for live results. With the baked store covering everything with an
 article, live fetches are the rare path and a second cache layer earns little.
+
+---
+
+## 17. Rank-weighted curation report, and the holes it found
+
+### The report was asking the wrong question
+
+`curate.ts` ranked unreviewed types by how many notable events each contained. That answers
+*"which gap is widest?"* but never *"what is the most important thing we are dropping?"* —
+and those diverge badly when a singleton type holds one irreplaceable event.
+
+**The Chernobyl disaster — rank 125, third in the entire corpus — was not on the map.** Its
+type `nuclear disaster` held one event, so it sorted far below Formula One seasons and never
+surfaced. `nuclear weapons testing` was in the taxonomy; `nuclear disaster` had simply never
+been added.
+
+A second report now lists the highest-ranked *dropped events* with the unrecognised types
+responsible. It immediately exposed far more than the handful already known:
+
+```
+125  1986  Chernobyl disaster            environmental disaster, nuclear disaster
+122  1776  US Declaration of Independence declaration of independence
+111  1945  Charter of the United Nations  charter, constitutive treaty
+ 93  1982  Falklands War                  undeclared war
+ 92  2011  Tohoku earthquake and tsunami  tsunami, megathrust earthquake
+ 90  1991  dissolution of the Soviet Union dissolution of an admin. territorial entity
+ 85   325  First Council of Nicaea        ecumenical council
+ 77  1938  Anschluss                      annexation
+ 77  1940  Battle of Britain              dogfight
+ 74  1969  Stonewall riots                LGBT+ protest
+ 73  2011  Fukushima Daiichi nuclear disaster  nuclear disaster
+```
+
+Taxonomy grew from 90 to 156 allowed types and 47 to 90 explicit exclusions. Kept rose
+19,627 → **20,660**, unreviewed fell 4,334 → **4,082**. The curated top now opens with
+Chernobyl, the Declaration of Independence, and the UN Charter.
+
+**Generalisation:** any filter needs a report ordered by *importance*, not only by *volume*.
+Volume-ordered lists are dominated by the uninteresting bulk, which is exactly where a
+singleton catastrophe hides.
+
+### Category precedence (a second order-dependence)
+
+With multiple allowlisted types per event, "first match wins" reintroduced the §16 bug in
+miniature: Chernobyl is both an `environmental disaster` and a `nuclear disaster` and landed
+under **accident** purely because that row came first. `CATEGORY_PRECEDENCE` now orders
+categories most-specific first, so generic containers (`incident`, `occurrence`) can never
+beat a precise classification. Chernobyl and Fukushima became *nuclear*, Katyn *atrocity*,
+and the Boston Tea Party moved from *other* to *politics*.
+
+### Co-location: the test was too strict
+
+§16 opened the group list when cluster members shared an *identical* coordinate. Too narrow.
+The Chernobyl disaster and the Chernobyl Mi-8 helicopter crash sit **~30 m apart** — not
+identical, so the list never opened, yet they still cluster at maximum zoom and the click
+silently did nothing.
+
+The rule is now whether the cluster's **expansion zoom exceeds the map's maximum**, which is
+the literal question: *is there any zoom on this map that separates these?* Exact co-location
+is retained only to word the panel accurately ("share one coordinate" vs "too close together
+to separate at any zoom level").
+
+### Known minor inefficiency
+
+The 286 events whose sitelink fails the QID check are retried on every prefetch run, costing
+roughly a minute. Caching negative results would fix it.

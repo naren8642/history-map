@@ -106,6 +106,12 @@ export function App() {
       {selection?.kind === 'group' && groupEvents && (
         <GroupPanel
           events={groupEvents}
+          sameCoordinate={
+            groupEvents.length > 1 &&
+            groupEvents.every(
+              (e) => e.c[0] === groupEvents[0]!.c[0] && e.c[1] === groupEvents[0]!.c[1],
+            )
+          }
           onPick={(qid) => setSelection({ kind: 'event', qid, from: selection.qids })}
           onClose={() => setSelection(null)}
         />
