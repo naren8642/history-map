@@ -9,7 +9,10 @@
  */
 
 import Supercluster from 'supercluster';
-import type { HistoryEvent, Category } from '../types.ts';
+import { CATEGORY_TIEBREAK, type Category, type HistoryEvent } from '../types.ts';
+
+/** Category tallies within a cluster, accumulated through the reduce. */
+export type CategoryCounts = Partial<Record<Category, number>>;
 
 /** Per-point properties carried into the index. */
 export interface PointProps {
@@ -20,14 +23,14 @@ export interface PointProps {
   /** Seeds the reduce, so clusters and points share a shape. */
   topRank: number;
   topName: string;
-  topCategory: Category;
+  counts: CategoryCounts;
 }
 
 /** Accumulated cluster properties. */
 export interface ClusterProps {
   topRank: number;
   topName: string;
-  topCategory: Category;
+  counts: CategoryCounts;
 }
 
 export type ClusterFeature = Supercluster.ClusterFeature<ClusterProps>;
@@ -61,7 +64,13 @@ export function buildIndex(
   maxZoom: number,
 ): Supercluster<PointProps, ClusterProps> {
   const index = new Supercluster<PointProps, ClusterProps>({
-    radius: 55,
+    /*
+     * Must exceed the largest rendered bubble diameter (60px at the cap in
+     * MapView), or clusters collide by construction: the previous 55px radius
+     * against bubbles up to 76px across is exactly why mid-zoom Europe looked
+     * like overlapping soup.
+     */
+    radius: 90,
     maxZoom,
     // Co-located events (160 State of the Union addresses on the US Capitol)
     // must still collapse into one bubble at every zoom, so clustering has to
@@ -70,13 +79,22 @@ export function buildIndex(
     map: (props): ClusterProps => ({
       topRank: props.r,
       topName: props.n,
-      topCategory: props.g,
+      counts: { ...props.counts },
     }),
     reduce: (accumulated, props): void => {
+      // Label still comes from the most notable member — "Waterloo +47" is far
+      // more informative than a bare count.
       if (props.topRank > accumulated.topRank) {
         accumulated.topRank = props.topRank;
         accumulated.topName = props.topName;
-        accumulated.topCategory = props.topCategory;
+      }
+      // Colour, however, must come from the whole membership. Colouring by the
+      // top-ranked member alone painted 52.8% of clusters a category that was
+      // not their majority — one 25-event cluster read as "politics" when
+      // politics was 12% of it and conflict 48%.
+      for (const [category, n] of Object.entries(props.counts)) {
+        const key = category as Category;
+        accumulated.counts[key] = (accumulated.counts[key] ?? 0) + (n ?? 0);
       }
     },
   });
@@ -92,7 +110,7 @@ export function buildIndex(
         r: e.r,
         topRank: e.r,
         topName: e.n,
-        topCategory: e.g,
+        counts: { [e.g]: 1 },
       },
     })),
   );
@@ -102,6 +120,20 @@ export function buildIndex(
 
 export const isCluster = (f: AnyFeature): f is ClusterFeature =>
   (f.properties as { cluster?: boolean }).cluster === true;
+
+/** Most common category in a cluster; ties broken by CATEGORY_TIEBREAK. */
+export function dominantCategory(counts: CategoryCounts): Category {
+  let best: Category = 'other';
+  let bestCount = -1;
+  for (const category of CATEGORY_TIEBREAK) {
+    const n = counts[category] ?? 0;
+    if (n > bestCount) {
+      best = category;
+      bestCount = n;
+    }
+  }
+  return best;
+}
 
 /** Cap on leaves pulled from one cluster; the US Capitol holds ~160. */
 const MAX_LEAVES = 500;
@@ -113,22 +145,3 @@ export function clusterLeaves(
   return index.getLeaves(clusterId, MAX_LEAVES) as PointFeature[];
 }
 
-/**
- * True when every point sits on the identical coordinate.
- *
- * Not used to decide whether to open the list — that is governed by whether the
- * cluster's expansion zoom exceeds the map's maximum, which also catches points
- * that are merely very close (Chernobyl's reactor and helicopter-crash sites are
- * ~30m apart and never separate). This only distinguishes the two cases so the
- * panel can describe them accurately.
- */
-export function isCoLocated(leaves: readonly PointFeature[]): boolean {
-  if (leaves.length < 2) return false;
-  const [first] = leaves;
-  if (!first) return false;
-  const [lon, lat] = first.geometry.coordinates as [number, number];
-  return leaves.every((l) => {
-    const [a, b] = l.geometry.coordinates as [number, number];
-    return a === lon && b === lat;
-  });
-}

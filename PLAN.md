@@ -723,3 +723,71 @@ to separate at any zoom level").
 
 The 286 events whose sitelink fails the QID check are retried on every prefetch run, costing
 roughly a minute. Caching negative results would fix it.
+
+---
+
+## 18. Milestone 5 findings (density), driven by a real-hardware recording
+
+Everything before this was measured in a software-rasterised preview pane, which could show
+*what* rendered but never *how it looked*. An 11-second screen recording on real hardware
+exposed two problems that no amount of headless probing would have surfaced.
+
+### Cluster colour was lying about composition
+
+Clusters inherited the **top-ranked member's** category — a milestone 2 decision made so the
+label could read "Battle of Waterloo +47". The colour came along with it, unexamined.
+
+Measured over Europe, 1900–1950: **52.8% of clusters were painted a category that was not
+their majority.** One 25-event cluster read as `politics` where politics was 12% of it and
+conflict 48%. On screen, Europe looked blue-and-teal while the legend said Conflict 1,145
+against Politics 119. The map was making a false claim about its own contents.
+
+Fixed by accumulating **category counts** through the reduce and colouring by the modal
+category, while the label still names the most notable member — the two questions get two
+answers instead of one answer serving both. Agreement with the true majority rose from
+47.2% to **88.3%**; the residual are exact ties, broken by an explicit precedence order
+rather than by object iteration order (the same determinism trap as §16 and §17).
+
+### Cluster overlap was arithmetic, not misfortune
+
+Supercluster's radius was **55px** while bubble radii scaled to **38px — a 76px diameter**.
+Any cluster past a couple of hundred points was drawn wider than the spacing that separated
+it, so collisions were guaranteed by construction. Radius is now 90 and the bubble ramp caps
+at 30 (60px diameter), safely inside it.
+
+### Zoom was the wrong input for the notability floor
+
+Measured over central Europe, the old zoom-tied floor produced:
+
+```
+zoom 2.7  floor 30   2,127 in view   110 drawn
+zoom 5    floor  7   1,078 in view   149 drawn   <- peak crowding
+zoom 7.5  floor  2      33 in view    18 drawn   <- cliff
+```
+
+Crowded through the mid zooms, barren above them. Zoom does not determine legibility: what
+matters is how many events are in view, which depends on zoom *and* window width *and*
+regional density — and the first design ignored two of the three.
+
+Replaced with a **feature budget** (`FEATURE_BUDGET = 90`). Clusters are never dropped, since
+a cluster is the only evidence that anything is there; the remaining budget goes to the most
+notable loose points, and the effective floor falls out of the data instead of being dictated
+to it. After:
+
+| zoom | before | after |
+|---|---|---|
+| 2.7 | 110 | **79** |
+| 4.1 | 102 | 60 |
+| 5 | **149** | **83** |
+| 6 | 106 | 75 |
+| 7.5 | 18 | **24** |
+
+The remaining drop at 7.5 is data-limited rather than policy-limited — only 33 events exist
+in that view. The budget also self-tunes: milestone 6 can triple the corpus without anyone
+retuning a threshold table.
+
+### Method note
+
+Two of these three were invisible to every check run so far. The preview pane could confirm
+that 110 features existed; it could not show that they overlapped, nor that their colours
+misrepresented them. **A rendering pipeline needs to be seen rendering.**

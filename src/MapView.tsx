@@ -4,11 +4,12 @@ import type { GeoJSON } from 'geojson';
 import {
   buildIndex,
   clusterLeaves,
+  dominantCategory,
   indexDepthFor,
   isCluster,
   type AnyFeature,
 } from './lib/clustering.ts';
-import { rankFloor } from './lib/rank.ts';
+import { pointBudget } from './lib/rank.ts';
 import { CATEGORY_COLOR, type Category, type HistoryEvent } from './types.ts';
 
 /**
@@ -27,7 +28,7 @@ interface Props {
   onSelect: (qid: number | null) => void;
   /** Co-located events that no zoom level can separate; opens a list instead. */
   onSelectGroup: (qids: number[]) => void;
-  onViewportChange: (visible: number, zoom: number) => void;
+  onViewportChange: (visible: number, zoom: number, floor: number) => void;
 }
 
 /** Build a MapLibre expression mapping the category property to its colour. */
@@ -111,11 +112,15 @@ export function MapView({ events, onSelect, onSelectGroup, onViewportChange }: P
         source: SOURCE,
         filter: ['==', ['get', 'cluster'], true],
         paint: {
-          'circle-color': categoryColorExpression('topCategory'),
+          'circle-color': categoryColorExpression('dom'),
           'circle-opacity': 0.82,
+          // Capped below the cluster radius (90) so bubbles cannot be drawn
+          // wider than the spacing that separated them. The old ramp reached a
+          // 76px diameter against a 55px radius, which guaranteed collisions
+          // for any cluster above a couple of hundred points.
           'circle-radius': [
             'interpolate', ['linear'], ['get', 'point_count'],
-            2, 13, 25, 20, 200, 28, 2000, 38,
+            2, 12, 25, 18, 200, 24, 2000, 30,
           ],
           'circle-stroke-width': 1.5,
           'circle-stroke-color': '#ffffff',
@@ -209,19 +214,45 @@ export function MapView({ events, onSelect, onSelectGroup, onViewportChange }: P
         setIndexDepth(nextDepth);
       }
 
-      const floor = rankFloor(zoom);
       const clustered = index.getClusters(bbox, Math.round(zoom)) as AnyFeature[];
 
-      // A cluster always survives: hiding it would erase the count that tells
-      // the user something here is worth zooming into. Only bare points below
-      // the floor are dropped.
-      const features = clustered.filter((f) => isCluster(f) || f.properties.r >= floor);
+      const clusters = clustered.filter(isCluster);
+      const points = clustered
+        .filter((f): f is Exclude<AnyFeature, typeof f & { properties: { cluster: true } }> => !isCluster(f))
+        .sort((a, b) => (b.properties as { r: number }).r - (a.properties as { r: number }).r);
+
+      // Spend the budget on clusters first, then the most notable loose points.
+      const kept = points.slice(0, pointBudget(clusters.length));
+
+      // Colour comes from the whole membership; the label still names the most
+      // notable member. Rebuild properties rather than mutating supercluster's,
+      // whose objects belong to the index and are reused between queries.
+      const features = [
+        ...clusters.map((c) => ({
+          ...c,
+          properties: {
+            cluster: true,
+            cluster_id: c.properties.cluster_id,
+            point_count: c.properties.point_count,
+            point_count_abbreviated: c.properties.point_count_abbreviated,
+            topName: c.properties.topName,
+            topRank: c.properties.topRank,
+            dom: dominantCategory(c.properties.counts),
+          },
+        })),
+        ...kept,
+      ];
+
+      // The floor is now an outcome rather than an input; surface it so the
+      // header can still say how deep the map is currently reaching.
+      const effectiveFloor =
+        kept.length > 0 ? (kept[kept.length - 1]!.properties as { r: number }).r : 0;
 
       const source = m.getSource(SOURCE) as maplibregl.GeoJSONSource | undefined;
       if (!source) return;
       source.setData({ type: 'FeatureCollection', features } as GeoJSON);
 
-      onViewportChange(features.length, zoom);
+      onViewportChange(features.length, zoom, effectiveFloor);
     };
 
     refresh();

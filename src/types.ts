@@ -62,6 +62,26 @@ export const CATEGORY_COLOR: Record<Category, string> = {
   other: '#7a7a7a',
 };
 
+/**
+ * Tie-break order when two categories are equally common in a cluster.
+ *
+ * Mirrors CATEGORY_PRECEDENCE in scripts/lib/taxonomy.ts, most-specific first.
+ * Without an explicit order the winner would depend on object iteration order —
+ * the same class of hidden order-dependence that made harvest categorisation
+ * irreproducible.
+ */
+export const CATEGORY_TIEBREAK: readonly Category[] = [
+  'nuclear',
+  'atrocity',
+  'terrorism',
+  'natural-disaster',
+  'conflict',
+  'accident',
+  'politics',
+  'culture',
+  'other',
+];
+
 export const CATEGORY_LABEL: Record<Category, string> = {
   conflict: 'Conflict',
   atrocity: 'Atrocity',

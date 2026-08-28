@@ -3,7 +3,6 @@ import { MapView } from './MapView.tsx';
 import { DetailPanel, GroupPanel } from './DetailPanel.tsx';
 import { Timeline, type TimeWindow } from './Timeline.tsx';
 import { useEvents } from './lib/useEvents.ts';
-import { rankFloor } from './lib/rank.ts';
 import { buildTimeScale } from './lib/timescale.ts';
 import {
   CATEGORY_COLOR,
@@ -27,7 +26,7 @@ const INITIAL_WINDOW: TimeWindow = { from: 1900, to: 1950 };
 export function App() {
   const { events, error } = useEvents();
   const [selection, setSelection] = useState<Selection | null>(null);
-  const [viewport, setViewport] = useState({ visible: 0, zoom: 1.6 });
+  const [viewport, setViewport] = useState({ visible: 0, zoom: 1.6, floor: 0 });
   const [window, setWindow] = useState<TimeWindow>(INITIAL_WINDOW);
 
   const years = useMemo(() => (events ?? []).map((e) => e.s), [events]);
@@ -67,8 +66,8 @@ export function App() {
     setSelection({ kind: 'group', qids });
   }, []);
 
-  const onViewportChange = useCallback((visible: number, zoom: number) => {
-    setViewport({ visible, zoom });
+  const onViewportChange = useCallback((visible: number, zoom: number, floor: number) => {
+    setViewport({ visible, zoom, floor });
   }, []);
 
   if (error) {
@@ -97,7 +96,7 @@ export function App() {
         <p className="muted small">
           {inWindow.length.toLocaleString()} events in window ·{' '}
           {viewport.visible.toLocaleString()} shown · zoom {viewport.zoom.toFixed(1)} ·
-          rank floor {rankFloor(viewport.zoom)}
+          floor {viewport.floor}
         </p>
       </header>
 
