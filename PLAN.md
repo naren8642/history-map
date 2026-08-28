@@ -996,3 +996,41 @@ events collected and discarded. Both were found by accident. Now the build says 
 - Both the event allowlist and the narrative exclusions need periodic review as Wikidata adds
   types. The two review reports (`EXPANSION CANDIDATES`, `MOST NOTABLE DROPPED EVENTS`) and
   the narrative top-40 list are the intended way to do that, not manual browsing.
+
+---
+
+## 21. Cluster peek: reaching an article without drilling
+
+**Feedback:** *"As I drill down on the consolidated pins it takes several clicks to get to the
+final zoom level where I can access the article popup. Can we add a hover popup listing the
+article titles under the pin, so I can expand that article directly?"*
+
+Reaching text cost a multi-click descent through zoom levels. That cost only grows with the
+narrative layer, where a story hull can sit three levels above the article wanted — so the
+peek was built **before** hulls, and the narrative layer will reuse it rather than inventing
+its own drill-down.
+
+### Behaviour
+
+- **Hover a cluster** → card listing its top 8 members by rank, plus "+N more".
+- **Click a title** → that article's detail panel. One hover, one click, from world zoom.
+- **Click the cluster** → full scrollable list of every member, with "Zoom to these".
+
+Clicking a cluster no longer zooms. Zoom remains on double-click, scroll, the map controls,
+and the panel's explicit action — but it is no longer the toll for reading something.
+
+### Two details that would have broken it
+
+**`getLeaves` returns tree order, not rank order.** The first five members of a 1,532-event
+cluster were ranks 8, 15, 5, 1, 7. Taking the first eight would have shown near-random obscure
+events as a cluster's "most notable". The whole membership must be pulled and sorted —
+measured at ~10ms for 1,532 members, against 1.6ms for a naive eight, and cached per cluster.
+
+**The card is interactive, so the pointer has to reach it.** Closing on mouse-out would make
+the titles unclickable. Opening is delayed 130ms so sweeping across clusters does not flash
+cards; closing is delayed 220ms and cancelled when the pointer enters the card. Any camera
+movement dismisses it, since its anchor position becomes stale.
+
+Verified on real data: hovering Germany in 1900–1950 lists the Munich Agreement, Anschluss,
+Potsdam Conference, Battle of Berlin, Beer Hall Putsch, Battle of the Bulge, Berlin Blockade
+and the Reichstag fire — and the full list reads as a browsable history of the period.

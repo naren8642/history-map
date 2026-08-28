@@ -122,6 +122,8 @@ interface GroupProps {
   /** True when every event shares one exact coordinate, rather than merely being close. */
   sameCoordinate: boolean;
   onPick: (qid: number) => void;
+  /** Absent when zooming cannot separate the members anyway. */
+  onZoom?: (() => void) | undefined;
   onClose: () => void;
 }
 
@@ -131,7 +133,7 @@ interface GroupProps {
  * close enough that they cluster all the way in. Without this they are simply
  * unreachable.
  */
-export function GroupPanel({ events, sameCoordinate, onPick, onClose }: GroupProps) {
+export function GroupPanel({ events, sameCoordinate, onPick, onZoom, onClose }: GroupProps) {
   const panel = useRef<HTMLElement | null>(null);
   useEffect(() => {
     panel.current?.focus();
@@ -158,12 +160,19 @@ export function GroupPanel({ events, sameCoordinate, onPick, onClose }: GroupPro
           ×
         </button>
       </div>
-      <p className="eyebrow">{events.length} events at this location</p>
-      <p className="muted small note">
-        {sameCoordinate
-          ? 'These share one coordinate, so the map cannot separate them.'
-          : 'These are too close together for the map to separate at any zoom level.'}
+      <p className="eyebrow">
+        {events.length.toLocaleString()} events here
+        {onZoom && (
+          <button className="zoom-to" onClick={onZoom}>
+            Zoom to these
+          </button>
+        )}
       </p>
+      {sameCoordinate && (
+        <p className="muted small note">
+          These share one coordinate, so the map cannot separate them.
+        </p>
+      )}
       <ul className="group-list">
         {sorted.map((e) => (
           <li key={e.q}>

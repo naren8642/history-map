@@ -135,13 +135,48 @@ export function dominantCategory(counts: CategoryCounts): Category {
   return best;
 }
 
-/** Cap on leaves pulled from one cluster; the US Capitol holds ~160. */
-const MAX_LEAVES = 500;
+/**
+ * Cap on leaves pulled from one cluster.
+ *
+ * Generous on purpose. `getLeaves` returns members in tree order, not by rank —
+ * the first five out of a 1,532-member cluster were ranks 8, 15, 5, 1, 7 — so
+ * taking the first N and sorting those would show near-random obscure events
+ * as a cluster's "most notable". The whole membership has to be pulled before
+ * it can be ranked. Measured at ~10ms for 1,532 members, which the hover-intent
+ * delay comfortably absorbs.
+ */
+const MAX_LEAVES = 20000;
 
 export function clusterLeaves(
   index: Supercluster<PointProps, ClusterProps>,
   clusterId: number,
 ): PointFeature[] {
   return index.getLeaves(clusterId, MAX_LEAVES) as PointFeature[];
+}
+
+/** Cluster membership is stable for a given index, so ranking is worth caching. */
+const rankedCache = new WeakMap<object, Map<number, PointProps[]>>();
+
+/**
+ * A cluster's members, most notable first. Backs both the hover peek and the
+ * full list panel.
+ */
+export function rankedMembers(
+  index: Supercluster<PointProps, ClusterProps>,
+  clusterId: number,
+): PointProps[] {
+  let perIndex = rankedCache.get(index);
+  if (!perIndex) {
+    perIndex = new Map();
+    rankedCache.set(index, perIndex);
+  }
+  const cached = perIndex.get(clusterId);
+  if (cached) return cached;
+
+  const ranked = clusterLeaves(index, clusterId)
+    .map((l) => l.properties)
+    .sort((a, b) => b.r - a.r);
+  perIndex.set(clusterId, ranked);
+  return ranked;
 }
 

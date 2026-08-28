@@ -3,12 +3,13 @@ import * as maplibregl from 'maplibre-gl';
 import type { GeoJSON } from 'geojson';
 import {
   buildIndex,
-  clusterLeaves,
   dominantCategory,
   indexDepthFor,
   isCluster,
+  rankedMembers,
   type AnyFeature,
 } from './lib/clustering.ts';
+import { ClusterPeek, PEEK_LIMIT, type PeekState } from './ClusterPeek.tsx';
 import { pointBudget } from './lib/rank.ts';
 import { CATEGORY_COLOR, type Category, type HistoryEvent } from './types.ts';
 
@@ -23,8 +24,24 @@ const SOURCE = 'events';
 
 const INITIAL_ZOOM = 1.6;
 
+/** Delay before a hover opens the peek, so passing over clusters does not flash cards. */
+const PEEK_OPEN_MS = 130;
+/**
+ * Grace period after the pointer leaves. The card's contents are clickable, so
+ * the pointer has to be able to travel from the cluster into the card; closing
+ * immediately would make it unreachable.
+ */
+const PEEK_CLOSE_MS = 220;
+
+/** Camera actions the surrounding UI needs; the map instance stays private. */
+export interface MapApi {
+  /** Frame a set of coordinates, e.g. the members of a group being listed. */
+  fitTo: (points: [number, number][]) => void;
+}
+
 interface Props {
   events: HistoryEvent[];
+  onMapApi?: (api: MapApi | null) => void;
   onSelect: (qid: number | null) => void;
   /** Co-located events that no zoom level can separate; opens a list instead. */
   onSelectGroup: (qids: number[]) => void;
@@ -37,7 +54,7 @@ function categoryColorExpression(prop: string): maplibregl.ExpressionSpecificati
   return ['match', ['get', prop], ...cases, CATEGORY_COLOR.other] as unknown as maplibregl.ExpressionSpecification;
 }
 
-export function MapView({ events, onSelect, onSelectGroup, onViewportChange }: Props) {
+export function MapView({ events, onMapApi, onSelect, onSelectGroup, onViewportChange }: Props) {
   const container = useRef<HTMLDivElement | null>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const [ready, setReady] = useState(false);
@@ -57,6 +74,11 @@ export function MapView({ events, onSelect, onSelectGroup, onViewportChange }: P
    */
   // Index depth tracks the map's zoom band; see indexDepthFor. Mirrored in a
   // ref so the move handler can compare without being rebuilt each time.
+  const [peek, setPeek] = useState<PeekState | null>(null);
+  const peekTimers = useRef<{ open?: number; close?: number }>({});
+  /** Which cluster the peek is for, so re-hovering the same one is a no-op. */
+  const peekCluster = useRef<number | null>(null);
+
   const [indexDepth, setIndexDepth] = useState(() => indexDepthFor(INITIAL_ZOOM));
   const depthRef = useRef(indexDepth);
 
@@ -183,8 +205,24 @@ export function MapView({ events, onSelect, onSelectGroup, onViewportChange }: P
       setReady(true);
     });
 
+    onMapApi?.({
+      fitTo: (points) => {
+        if (points.length === 0) return;
+        const bounds = points.reduce(
+          (acc, p) => acc.extend(p),
+          new maplibregl.LngLatBounds(points[0]!, points[0]!),
+        );
+        // Co-located members produce a zero-area bounds, which fitBounds cannot
+        // frame; ease to the point at a close zoom instead.
+        const flat = bounds.getWest() === bounds.getEast() && bounds.getSouth() === bounds.getNorth();
+        if (flat) m.easeTo({ center: points[0]!, zoom: 14, duration: 500 });
+        else m.fitBounds(bounds, { padding: 90, maxZoom: 14, duration: 500 });
+      },
+    });
+
     return () => {
       resizeObserver.disconnect();
+      onMapApi?.(null);
       m.remove();
       map.current = null;
       setReady(false);
@@ -267,37 +305,58 @@ export function MapView({ events, onSelect, onSelectGroup, onViewportChange }: P
     const m = map.current;
     if (!m || !ready) return;
 
+    const clearPeekTimers = (): void => {
+      window.clearTimeout(peekTimers.current.open);
+      window.clearTimeout(peekTimers.current.close);
+      peekTimers.current = {};
+    };
+
+    const closePeek = (): void => {
+      clearPeekTimers();
+      peekCluster.current = null;
+      setPeek(null);
+    };
+
+    const openPeekFor = (feature: maplibregl.MapGeoJSONFeature): void => {
+      const clusterId = feature.properties?.['cluster_id'] as number | undefined;
+      if (clusterId === undefined || peekCluster.current === clusterId) return;
+
+      clearPeekTimers();
+      peekTimers.current.open = window.setTimeout(() => {
+        const members = rankedMembers(index, clusterId);
+        if (members.length === 0) return;
+        const [lon, lat] = (feature.geometry as GeoJSON.Point).coordinates as [number, number];
+        const point = m.project([lon, lat]);
+        peekCluster.current = clusterId;
+        setPeek({ members: members.slice(0, PEEK_LIMIT), x: point.x, y: point.y, total: members.length });
+      }, PEEK_OPEN_MS);
+    };
+
+    const onClusterHover = (e: maplibregl.MapMouseEvent): void => {
+      const feature = m.queryRenderedFeatures(e.point, { layers: ['clusters'] })[0];
+      if (feature) openPeekFor(feature);
+    };
+
+    const onClusterOut = (): void => {
+      clearPeekTimers();
+      peekTimers.current.close = window.setTimeout(closePeek, PEEK_CLOSE_MS);
+    };
+
     const onClusterClick = (e: maplibregl.MapMouseEvent): void => {
       const feature = m.queryRenderedFeatures(e.point, { layers: ['clusters'] })[0];
       if (!feature) return;
       const clusterId = feature.properties?.['cluster_id'] as number;
 
-      const expansion = index.getClusterExpansionZoom(clusterId);
-
       /*
-       * Zooming is the normal response, but it cannot always make progress.
+       * Clicking a cluster opens its contents rather than zooming.
        *
-       * The first version of this test asked whether the members shared an
-       * identical coordinate. Too strict: the Chernobyl disaster and the
-       * Chernobyl Mi-8 helicopter crash sit ~30m apart, which is not identical
-       * but still clusters at maximum zoom — so the click silently did nothing
-       * and one of the two stayed unreachable.
-       *
-       * The honest question is whether any zoom level available on this map
-       * would separate them. If the expansion zoom is beyond maxZoom, none
-       * will, so list them instead.
+       * Zoom-to-expand made reaching an article a multi-click descent, which is
+       * the problem this change exists to remove. Zooming is still available —
+       * double-click, scroll, and the "Zoom to these" action in the panel — but
+       * it is no longer the toll for reading something.
        */
-      if (expansion > m.getMaxZoom()) {
-        const leaves = clusterLeaves(index, clusterId);
-        onSelectGroup(leaves.map((l) => l.properties.q));
-        return;
-      }
-
-      m.easeTo({
-        center: (feature.geometry as GeoJSON.Point).coordinates as [number, number],
-        zoom: Math.min(expansion, m.getMaxZoom()),
-        duration: 450,
-      });
+      closePeek();
+      onSelectGroup(rankedMembers(index, clusterId).map((p) => p.q));
     };
 
     const onPointClick = (e: maplibregl.MapMouseEvent): void => {
@@ -310,14 +369,22 @@ export function MapView({ events, onSelect, onSelectGroup, onViewportChange }: P
 
     m.on('click', 'clusters', onClusterClick);
     m.on('click', 'points', onPointClick);
+    m.on('mousemove', 'clusters', onClusterHover);
+    m.on('mouseleave', 'clusters', onClusterOut);
+    // Any camera movement invalidates the card's anchor position.
+    m.on('movestart', closePeek);
     for (const layer of ['clusters', 'points'] as const) {
       m.on('mouseenter', layer, pointer);
       m.on('mouseleave', layer, reset);
     }
 
     return () => {
+      clearPeekTimers();
       m.off('click', 'clusters', onClusterClick);
       m.off('click', 'points', onPointClick);
+      m.off('mousemove', 'clusters', onClusterHover);
+      m.off('mouseleave', 'clusters', onClusterOut);
+      m.off('movestart', closePeek);
       for (const layer of ['clusters', 'points'] as const) {
         m.off('mouseenter', layer, pointer);
         m.off('mouseleave', layer, reset);
@@ -325,5 +392,33 @@ export function MapView({ events, onSelect, onSelectGroup, onViewportChange }: P
     };
   }, [ready, index, onSelect, onSelectGroup]);
 
-  return <div ref={container} className="map" />;
+  return (
+    <div ref={container} className="map">
+      {peek && (
+        <ClusterPeek
+          peek={peek}
+          onSelect={(qid) => {
+            setPeek(null);
+            peekCluster.current = null;
+            onSelect(qid);
+          }}
+          onOpenAll={() => {
+            const all = peekCluster.current;
+            setPeek(null);
+            peekCluster.current = null;
+            if (all !== null) onSelectGroup(rankedMembers(index, all).map((p) => p.q));
+          }}
+          onPointerEnter={() => {
+            window.clearTimeout(peekTimers.current.close);
+          }}
+          onPointerLeave={() => {
+            peekTimers.current.close = window.setTimeout(() => {
+              peekCluster.current = null;
+              setPeek(null);
+            }, PEEK_CLOSE_MS);
+          }}
+        />
+      )}
+    </div>
+  );
 }

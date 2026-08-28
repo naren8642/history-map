@@ -1,5 +1,5 @@
-import { useCallback, useDeferredValue, useMemo, useState } from 'react';
-import { MapView } from './MapView.tsx';
+import { useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
+import { MapView, type MapApi } from './MapView.tsx';
 import { DetailPanel, GroupPanel } from './DetailPanel.tsx';
 import { Timeline, type TimeWindow } from './Timeline.tsx';
 import { useEvents } from './lib/useEvents.ts';
@@ -66,6 +66,11 @@ export function App() {
     setSelection({ kind: 'group', qids });
   }, []);
 
+  const mapApi = useRef<MapApi | null>(null);
+  const handleMapApi = useCallback((api: MapApi | null) => {
+    mapApi.current = api;
+  }, []);
+
   const onViewportChange = useCallback((visible: number, zoom: number, floor: number) => {
     setViewport({ visible, zoom, floor });
   }, []);
@@ -86,6 +91,7 @@ export function App() {
     <div className="app">
       <MapView
         events={inWindow}
+        onMapApi={handleMapApi}
         onSelect={selectEvent}
         onSelectGroup={selectGroup}
         onViewportChange={onViewportChange}
@@ -112,6 +118,7 @@ export function App() {
             )
           }
           onPick={(qid) => setSelection({ kind: 'event', qid, from: selection.qids })}
+          onZoom={() => mapApi.current?.fitTo(groupEvents.map((e) => e.c))}
           onClose={() => setSelection(null)}
         />
       )}
