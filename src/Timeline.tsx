@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { densityBins, formatYearShort, type TimeScale } from './lib/timescale.ts';
+import type { Narrative } from './lib/narratives.ts';
 
 export interface TimeWindow {
   from: number;
@@ -12,6 +13,10 @@ interface Props {
   years: readonly number[];
   window: TimeWindow;
   onChange: (window: TimeWindow) => void;
+  /** Major stories to draw as spans above the axis. */
+  bands?: Narrative[];
+  activeBand?: number | null;
+  onSelectBand?: (qid: number) => void;
 }
 
 const BIN_COUNT = 240;
@@ -26,6 +31,21 @@ const MIN_SPAN_FRACTION = 0.004;
  * text is thinned.
  */
 const MIN_LABEL_GAP = 0.05;
+
+/** Stacked rows available for story bands before they would crowd the axis. */
+const BAND_ROWS = 3;
+
+/**
+ * Minimum axis fraction before a band's label fits *inside* it.
+ *
+ * Below this the label sits outside, to the right. Duration and importance are
+ * unrelated: World War II occupies six years and renders about 20px wide, while
+ * the Middle Ages spans a thousand and renders ten times that. Clipping the
+ * label to the band would leave the most significant stories showing a single
+ * character, so the band keeps its honest width and the name moves out beside
+ * it.
+ */
+const MIN_BAND_LABEL = 0.045;
 
 /**
  * Width presets lock the window to a fixed span **in years**. Selecting one is
@@ -50,7 +70,15 @@ interface DragState {
   originToFraction: number;
 }
 
-export function Timeline({ scale, years, window: win, onChange }: Props) {
+export function Timeline({
+  scale,
+  years,
+  window: win,
+  onChange,
+  bands = [],
+  activeBand = null,
+  onSelectBand,
+}: Props) {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const drag = useRef<DragState | null>(null);
   /** Pending value for the next frame; scrubbing coalesces to one commit per frame. */
@@ -274,6 +302,30 @@ export function Timeline({ scale, years, window: win, onChange }: Props) {
     [presetYears, toFraction, fromFraction, fromFractionSpan, win, onChange, clampYears],
   );
 
+  /**
+   * Lay bands out in rows, greedily, so overlapping stories do not draw on top
+   * of one another. Sorted by rank first, so the most significant story gets
+   * the top row and the clearest read.
+   */
+  const laidOut = useMemo(() => {
+    const rowEnds: number[] = [];
+    const placed: { n: Narrative; row: number; from: number; to: number }[] = [];
+    for (const n of [...bands].sort((a, b) => b.r - a.r)) {
+      const from = scale.yearToFraction(n.s);
+      const to = scale.yearToFraction(Math.max(n.e, n.s));
+      // A band narrower than this is unreadable and unclickable; give it a floor.
+      const end = Math.max(to, from + 0.012);
+      let row = rowEnds.findIndex((edge) => from > edge + 0.01);
+      if (row === -1) {
+        if (rowEnds.length >= BAND_ROWS) continue;
+        row = rowEnds.length;
+      }
+      rowEnds[row] = end;
+      placed.push({ n, row, from, to: end });
+    }
+    return placed;
+  }, [bands, scale]);
+
   const widthYears = win.to - win.from;
 
   return (
@@ -306,6 +358,24 @@ export function Timeline({ scale, years, window: win, onChange }: Props) {
           ))}
         </span>
       </div>
+
+      {laidOut.length > 0 && (
+        <div className="timeline-bands" style={{ height: BAND_ROWS * 17 }}>
+          {laidOut.map(({ n, row, from, to }) => (
+            <button
+              key={n.q}
+              className={n.q === activeBand ? 'band band--on' : 'band'}
+              style={{ left: `${from * 100}%`, width: `${(to - from) * 100}%`, top: row * 17 }}
+              onClick={() => onSelectBand?.(n.q)}
+              title={`${formatYearShort(n.s)}–${n.o ? '?' : formatYearShort(n.e)} · ${n.n}`}
+            >
+              <span className={to - from >= MIN_BAND_LABEL ? 'band-label' : 'band-label band-label--out'}>
+                {n.n}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div
         ref={trackRef}

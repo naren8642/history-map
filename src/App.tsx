@@ -91,6 +91,21 @@ export function App() {
   }, [activeStory, narrativeIndex, deferredWindow]);
 
   /**
+   * Bands are chosen over the whole timeline domain, not the current window:
+   * they exist to show where the big stories *are*, including ones the window
+   * is not currently over.
+   */
+  const bandNarratives = useMemo(() => {
+    const pool = activeStory
+      ? narrativeIndex.childrenOf.get(activeStory.q) ?? []
+      : narrativeIndex.roots;
+    return pool
+      .filter((n) => n.total > 0 || n.e > n.s)
+      .sort((a, b) => b.r - a.r)
+      .slice(0, 14);
+  }, [activeStory, narrativeIndex]);
+
+  /**
    * Entering a story narrows the map to its members. Its own events plus
    * everything beneath its sub-stories — the whole subtree, so entering "World
    * War II" shows the Pacific and Eastern Front battles too, not just the
@@ -200,7 +215,21 @@ export function App() {
         />
       )}
 
-      <Timeline scale={scale} years={years} window={window} onChange={setWindow} />
+      <Timeline
+        scale={scale}
+        years={years}
+        window={window}
+        onChange={setWindow}
+        bands={bandNarratives}
+        activeBand={story}
+        onSelectBand={(qid) => {
+          setStory(qid);
+          const n = narrativeIndex.byQid.get(qid);
+          // Bring the window to the story, otherwise selecting a band can
+          // leave the map empty because the story lies outside the window.
+          if (n) setWindow({ from: n.s, to: Math.max(n.e, n.s + 1) });
+        }}
+      />
     </div>
   );
 }

@@ -1056,3 +1056,56 @@ movement dismisses it, since its anchor position becomes stale.
 Verified on real data: hovering Germany in 1900–1950 lists the Munich Agreement, Anschluss,
 Potsdam Conference, Battle of Berlin, Beer Hall Putsch, Battle of the Bulge, Berlin Blockade
 and the Reichstag fire — and the full list reads as a browsable history of the period.
+
+---
+
+## 22. Milestone 6 rendering: the story layer on screen
+
+Story-first map, region hulls, and timeline bands — the three decisions from §19, built.
+
+### What it does
+
+Root stories overlapping the window draw as labelled anchors over the event clusters.
+Entering one narrows the map to everything beneath it, recomposes the legend to that story's
+own makeup, and surfaces its sub-stories on both the map and the timeline. A breadcrumb leads
+back out.
+
+Entering **World War II**: 905 events in the window, legend reading Conflict 869 / Atrocity 30,
+sub-stories Winter War, 1939 Invasion of Poland, Battle of Kursk.
+Clicking the **Cold War** band: window moves to 1945–1991, 318 events, sub-stories Korean War,
+Vietnam War, Hungarian Revolution of 1956, Revolutions of 1989, Bangladesh Liberation War.
+
+Membership resolves on the client. The baked file stores each narrative's parents but not its
+members; events already name their parents, so the reverse index is cheaper to build at load
+than to ship. Descent dedupes by QID and guards cycles — containment is a DAG, and Wikidata
+does make it circular.
+
+### Four things that only showed up on screen
+
+**Hulls cannot all be drawn at once.** World War II's convex hull spans most of the planet —
+it genuinely happened almost everywhere — and eight such fills at 7% opacity turned the map
+uniformly grey while conveying nothing. Labels now advertise which stories exist; the extent
+appears only for the story hovered or entered.
+
+**MapLibre suppressed six of eight story labels** through collision with event pins, including
+World War II, the most important object on the map. Story labels now ignore placement
+collisions; the budget of eight keeps that from becoming clutter.
+
+**Click priority had to become explicit.** Layer handlers raced each other, and a guard meant
+to stop vast hulls swallowing pin clicks also made the World War II anchor unreachable, because
+it sat beneath a 42-event cluster. A single handler now resolves in order — story anchor, then
+events, then hull — because an anchor is a small deliberate target and a hull is a vast
+background, and they need opposite treatment.
+
+**Duration and importance are unrelated.** World War II's band is ~20px wide against the
+Middle Ages' 186px. Clipping labels to band width left the most significant stories showing a
+single character. Bands keep their honest width; narrow ones put the name beside them.
+
+### Still open
+
+- The label anchor is the centroid of members, which for a global story lands somewhere
+  arbitrary — World War II's sits near Syria. A density-weighted anchor would read better.
+- Convex hulls over scattered members overstate extent. Concave hulls, or one hull per
+  geographic cluster of members, would be truer.
+- Nothing yet marks how much of a period the story layer covers. In sparse regions and eras
+  the map silently falls back to bare events, which is correct behaviour but reads as absence.
