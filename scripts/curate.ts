@@ -15,6 +15,7 @@ import {
   ALLOWED,
   CATEGORIES,
   DELIBERATELY_EXCLUDED,
+  EVENT_ONLY_EXCLUDED,
   TYPE_LABELS,
   categoryFor,
   type Category,
@@ -216,7 +217,8 @@ async function main(): Promise<void> {
       continue;
     }
 
-    if (types.some((t) => DELIBERATELY_EXCLUDED.has(t))) {
+    // Events apply both lists; narratives apply only the shared one.
+    if (types.some((t) => DELIBERATELY_EXCLUDED.has(t) || EVENT_ONLY_EXCLUDED.has(t))) {
       excludedKnown++;
       continue;
     }

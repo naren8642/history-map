@@ -115,11 +115,21 @@ const articleTitle = (url: string): string | undefined => {
   }
 };
 
+/**
+ * One query per type.
+ *
+ * The `NOT EXISTS ... wd:Q6256` clause drops polities that are still countries
+ * today. Removing `country` from the type list above was not enough on its own:
+ * modern states also record their founding as a `historical country`, so
+ * Nigeria, Saudi Arabia and Bhutan arrived at ranks 350, 349 and 303 —
+ * outranking World War II at 291 — each with nothing beneath them.
+ */
 function buildQuery(typeQid: number): string {
   return `
 SELECT ?i ?iLabel ?desc ?article ?coord ?inception ?dissolved ?start ?end ?sl ?parent WHERE {
   ?i wdt:P31 wd:Q${typeQid} ; wikibase:sitelinks ?sl .
   FILTER(?sl >= ${MIN_SITELINKS})
+  FILTER NOT EXISTS { ?i wdt:P31 wd:Q6256 }
   { ?i wdt:P571 ?inception } UNION { ?i wdt:P580 ?start }
   OPTIONAL { ?i wdt:P576 ?dissolved }
   OPTIONAL { ?i wdt:P582 ?end }

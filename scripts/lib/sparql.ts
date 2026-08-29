@@ -15,9 +15,9 @@ const USER_AGENT = 'history-map-harvest/0.1 (https://github.com/naren/history-ma
 const CLIENT_TIMEOUT_MS = 55_000;
 
 /** Wikimedia asks for serial, not parallel, access. One request per second. */
-const MIN_REQUEST_GAP_MS = 1_000;
+const MIN_REQUEST_GAP_MS = 1_500;
 
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 5;
 
 export type Binding = Record<string, { value: string; type: string; datatype?: string }>;
 
@@ -86,19 +86,32 @@ export async function sparql(query: string): Promise<Binding[]> {
 
       const body = await res.text();
 
-      if (looksLikeTimeout(res.status, body)) {
-        throw new QueryTimeout(`WDQS timed out (HTTP ${res.status})`);
-      }
-
-      // 429 and 5xx are transient — back off and retry the same query.
+      /*
+       * Status is checked before the timeout heuristic, not after.
+       *
+       * WDQS returns 429 with an empty body when rate limiting, and the
+       * heuristic treats an empty body as a timeout — so a rate limit was
+       * being reported as "WDQS timed out (HTTP 429)" and propagated straight
+       * past the backoff that exists to handle it.
+       */
       if (res.status === 429 || res.status >= 500) {
         const retryAfter = Number(res.headers.get('retry-after')) || 0;
         lastError = new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
         if (attempt < MAX_RETRIES) {
-          await sleep(retryAfter > 0 ? retryAfter * 1000 : 2 ** attempt * 1000);
+          // Honour Retry-After; otherwise back off with jitter so retries do
+          // not resynchronise into the same limit.
+          await sleep(
+            retryAfter > 0
+              ? retryAfter * 1000
+              : 5_000 * 2 ** (attempt - 1) * (1 + Math.random()),
+          );
           continue;
         }
         throw lastError;
+      }
+
+      if (looksLikeTimeout(res.status, body)) {
+        throw new QueryTimeout(`WDQS timed out (HTTP ${res.status})`);
       }
 
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${body.slice(0, 300)}`);

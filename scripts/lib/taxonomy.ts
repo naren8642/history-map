@@ -335,11 +335,7 @@ export const DELIBERATELY_EXCLUDED = new Map<number, string>([
   [28122896, 'rural municipality of Estonia'],
   [26742250, 'former municipality of Estonia'],
   [11924610, 'Formula One Grand Prix'],
-  // Handled by the polities pass as narratives; as events they would be
-  // duplicates in the wrong layer.
-  [3024240, 'historical country — belongs to the narrative layer'],
-  [11514315, 'historical period — belongs to the narrative layer'],
-  [839954, 'archaeological site — belongs to the narrative layer'],
+
   // Recurring *series*, distinct from the editions already excluded. These
   // surface as narratives because their editions are "part of" them.
   [1955280, 'music competition'],
@@ -350,6 +346,24 @@ export const DELIBERATELY_EXCLUDED = new Map<number, string>([
   [27020041, 'sports season'],
   [15991303, 'sports competition series'],
   [16510064, 'sporting event'],
+]);
+
+/**
+ * Excluded from the **event** layer only, because they belong to the narrative
+ * layer instead — they are not junk.
+ *
+ * Kept separate from DELIBERATELY_EXCLUDED because the two lists mean opposite
+ * things to the two consumers. Folding these into the shared list removed the
+ * polities from *both* layers: narrative curation applies the same exclusions,
+ * so "route this to narratives" silently became "drop this everywhere", and
+ * 1,415 of 1,446 polities vanished — the Ottoman Empire, Ancient Egypt, Tang,
+ * Aksum, Mali. A shared list whose entries mean different things to different
+ * readers is a trap; these get their own.
+ */
+export const EVENT_ONLY_EXCLUDED = new Map<number, string>([
+  [3024240, 'historical country — belongs to the narrative layer'],
+  [11514315, 'historical period — belongs to the narrative layer'],
+  [839954, 'archaeological site — belongs to the narrative layer'],
 ]);
 
 export const ALLOWED: ReadonlyMap<number, Category> = new Map(

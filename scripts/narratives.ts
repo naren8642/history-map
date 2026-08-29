@@ -16,7 +16,7 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { gzipSync } from 'node:zlib';
-import { sparql } from './lib/sparql.ts';
+import { sparql, SplittableError } from './lib/sparql.ts';
 import { DELIBERATELY_EXCLUDED } from './lib/taxonomy.ts';
 import type { EventRecord } from './lib/normalize.ts';
 import type { PolityRecord } from './harvest-polities.ts';
@@ -28,6 +28,8 @@ const OUT = 'data/raw/narratives.json';
 
 /** QIDs per SPARQL VALUES batch. */
 const BATCH = 200;
+/** Below this a batch is too small to be worth halving again. */
+const MIN_BATCH = 10;
 /** Safety bound on walking up the DAG. */
 const MAX_LEVELS = 6;
 
@@ -78,16 +80,28 @@ const articleTitle = (url: string): string | undefined => {
   }
 };
 
+/**
+ * Resolve one batch of candidate narratives.
+ *
+ * The `NOT EXISTS ... wd:Q6256` filter excludes states that still exist today,
+ * mirroring the polities harvest. It is needed in both places: events name
+ * their country as a P361 parent, so Nigeria, Suriname and the Solomon Islands
+ * re-entered through the event path even after the polity pass dropped them —
+ * Nigeria at rank 350, above World War II, with one event beneath it.
+ */
 async function resolveBatch(qids: number[]): Promise<Map<number, Resolved>> {
   const values = qids.map((q) => `wd:Q${q}`).join(' ');
   const query = `
-SELECT ?i ?iLabel ?desc ?article ?sl ?start ?end ?pit ?up ?type WHERE {
+SELECT ?i ?iLabel ?desc ?article ?sl ?start ?end ?pit ?inception ?dissolved ?up ?type WHERE {
   VALUES ?i { ${values} }
   ?i wikibase:sitelinks ?sl .
+  FILTER NOT EXISTS { ?i wdt:P31 wd:Q6256 }
   OPTIONAL { ?i wdt:P31 ?type }
   OPTIONAL { ?i wdt:P580 ?start }
   OPTIONAL { ?i wdt:P582 ?end }
   OPTIONAL { ?i wdt:P585 ?pit }
+  OPTIONAL { ?i wdt:P571 ?inception }
+  OPTIONAL { ?i wdt:P576 ?dissolved }
   OPTIONAL { ?i wdt:P361 ?up }
   OPTIONAL { ?i schema:description ?desc FILTER(lang(?desc) = "en") }
   OPTIONAL { ?article schema:about ?i ; schema:isPartOf <https://en.wikipedia.org/> }
@@ -115,8 +129,20 @@ SELECT ?i ?iLabel ?desc ?article ?sl ?start ?end ?pit ?up ?type WHERE {
 
     // A narrative's span may come from P580/P582 or, for one-off happenings
     // used as parents, from a P585 instant.
-    const start = b.start ? parseYear(b.start.value) : b.pit ? parseYear(b.pit.value) : null;
-    const end = b.end ? parseYear(b.end.value) : null;
+    // Inception is how polities and long-lived institutions are dated; reading
+    // only start/point-in-time was what lost most of the layer.
+    const start = b.start
+      ? parseYear(b.start.value)
+      : b.pit
+        ? parseYear(b.pit.value)
+        : b.inception
+          ? parseYear(b.inception.value)
+          : null;
+    const end = b.end
+      ? parseYear(b.end.value)
+      : b.dissolved
+        ? parseYear(b.dissolved.value)
+        : null;
     if (start === null) continue; // undated: cannot be placed on the timeline
 
     const rec: Resolved = {
@@ -138,9 +164,44 @@ SELECT ?i ?iLabel ?desc ?article ?sl ?start ?end ?pit ?up ?type WHERE {
   return out;
 }
 
-async function resolveAll(seed: Set<number>): Promise<Map<number, Resolved>> {
-  const resolved = new Map<number, Resolved>();
-  let frontier = [...seed];
+/**
+ * Halve a batch that times out, the same way the harvest chunker halves a date
+ * range. Without this one slow batch of 200 aborted the entire pass — a whole
+ * multi-minute run lost to a single unlucky query.
+ */
+async function resolveWithSplit(qids: number[]): Promise<Map<number, Resolved>> {
+  try {
+    return await resolveBatch(qids);
+  } catch (err) {
+    if (!(err instanceof SplittableError) || qids.length <= MIN_BATCH) {
+      console.log(`    batch of ${qids.length} failed, skipping`);
+      return new Map();
+    }
+    const mid = Math.floor(qids.length / 2);
+    console.log(`    batch of ${qids.length} timed out -> splitting`);
+    const left = await resolveWithSplit(qids.slice(0, mid));
+    const right = await resolveWithSplit(qids.slice(mid));
+    return new Map([...left, ...right]);
+  }
+}
+
+async function resolveAll(
+  seed: Set<number>,
+  preResolved: Map<number, Resolved>,
+): Promise<Map<number, Resolved>> {
+  // Polities arrive already resolved by their own harvest pass. Re-querying
+  // them was not merely wasteful, it was lossy: this resolver reads P580/P582
+  // and P585 but never P571, and inception is how most historical polities are
+  // dated. That silently discarded 1,364 of 1,446 of them as "undated" —
+  // the Ottoman and Byzantine Empires, Ancient Egypt, the Holy Roman Empire,
+  // the Soviet Union — 94% of the layer this pass exists to build.
+  const resolved = new Map(preResolved);
+  let frontier = [...seed].filter((q) => !resolved.has(q));
+
+  // Ancestors of the pre-resolved set still need looking up.
+  for (const r of preResolved.values()) {
+    for (const up of r.parents) if (!resolved.has(up)) frontier.push(up);
+  }
 
   for (let level = 0; level < MAX_LEVELS && frontier.length > 0; level++) {
     const pending = frontier.filter((q) => !resolved.has(q));
@@ -148,8 +209,7 @@ async function resolveAll(seed: Set<number>): Promise<Map<number, Resolved>> {
 
     console.log(`  level ${level}: resolving ${pending.length} candidates`);
     for (let i = 0; i < pending.length; i += BATCH) {
-      const batch = pending.slice(i, i + BATCH);
-      const got = await resolveBatch(batch);
+      const got = await resolveWithSplit(pending.slice(i, i + BATCH));
       for (const [q, r] of got) resolved.set(q, r);
     }
 
@@ -198,13 +258,31 @@ async function main(): Promise<void> {
   const seed = new Set<number>();
   for (const e of events) for (const p of e.pa ?? []) seed.add(p);
   const fromEvents = seed.size;
-  for (const p of polities) seed.add(p.q);
+
+  // Polities carry everything a narrative needs — name, description, article,
+  // span, rank, parents — so they seed the resolved set directly rather than
+  // being looked up again.
+  const preResolved = new Map<number, Resolved>();
+  for (const p of polities) {
+    preResolved.set(p.q, {
+      q: p.q,
+      n: p.n,
+      s: p.s,
+      e: p.e,
+      r: p.r,
+      parents: p.pa ?? [],
+      types: p.t ?? [],
+      ...(p.d ? { d: p.d } : {}),
+      ...(p.w ? { w: p.w } : {}),
+    });
+  }
+
   console.log(
     `  ${fromEvents.toLocaleString()} P361 targets from events, ` +
-      `${polities.length.toLocaleString()} polities, ${seed.size.toLocaleString()} distinct\n`,
+      `${polities.length.toLocaleString()} polities pre-resolved\n`,
   );
 
-  const resolved = await resolveAll(seed);
+  const resolved = await resolveAll(seed, preResolved);
 
   // A polity's own coordinate anchors it when too little sits beneath it to
   // form a hull — the common case in exactly the sparse regions this pass
