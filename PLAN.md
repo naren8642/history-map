@@ -1178,6 +1178,9 @@ from "what does Wikidata have?" to "what are the major topics in world history?"
 finding their data. Pairs naturally with synthesis, since a topic with no coordinate still has
 an article and can still be placed approximately.
 
+> **Corrected in §24.** The claim above that this reaches topics Wikidata lacks is wrong —
+> it reaches no new topics at all. What it is actually worth is stated in §24.
+
 Licensing is not the obstacle: Wikipedia text is CC BY-SA, reuse with attribution is explicit,
 and we attribute on every panel. At our scale the API is fine (19,412 summaries in ~40 min);
 bulk work should use Wikimedia dumps rather than slow scraping.
@@ -1221,3 +1224,98 @@ Worth keeping in view, because each cost real time and each recurred:
   hulls greying out the map, six of eight story labels suppressed — none visible headless.
 - **Shared lists with divergent meanings.** One exclusion list read by two consumers turned
   "route this elsewhere" into "drop this everywhere".
+
+
+## 24. Can we source events from Wikipedia instead?
+
+Asked directly: Wikipedia has articles for the Cholas, the Māori, the Qing — are we missing
+them because they are not in Wikidata?
+
+**No, and the premise does not hold.** 37 topics probed, weighted toward the non-European
+record. **None lacked a Wikidata item.** This is structural rather than lucky: Wikidata is
+what stores the interlanguage links between Wikipedia editions, so an established article
+essentially always has an item. "On Wikipedia but not in Wikidata" is close to a
+non-category.
+
+Switching source would therefore have gained nothing and cost the structure the app runs on —
+article titles carry no coordinates, no dates, and no types. Wikipedia supplies prose;
+Wikidata supplies placement. This retires the question.
+
+It also corrects §23: **Vital Articles is not a route to topics Wikidata is missing.** Its
+value is narrower and still real — a human-curated importance ranking that does not correlate
+with having coordinates, and so a better answer to "what matters" than sitelink count. Worth
+doing on that basis alone, not as coverage rescue.
+
+### What the probe found instead
+
+14 of the 37 were absent from the app. Six of those **pass every gate** and sit correctly in
+`polities.json`: Chola dynasty, Tang, Maya civilization, Qin, Zhou, the Delhi Sultanate. The
+loss was downstream, at [`scripts/narratives.ts`](scripts/narratives.ts) — a narrative with no
+coordinate of its own and nothing geolocated beneath it hit an unlogged `continue`.
+
+**515 of 1,438 polities — 36% — died there.** Ranked by sitelinks: Industrial Revolution 161,
+Vikings 157, Aztec 148, Maya 141, Great Depression 133, Tang 128, Qin 100, Zhou 91.
+
+The guard itself is right; a story with no geography cannot be drawn. What was wrong is that
+it was the only rejection on that loop without a counter, so a third of the corpus vanished
+while the run exited 0. **Fifth instance of this shape.** See the failure modes in §23.
+
+### `locate-polities.ts`
+
+Wikidata does know where these are — it just does not say so with `P625`. It says so with the
+capital, the location, the country. The pass follows one hop to something that carries a
+coordinate and records **which edge was used**, so a derived point stays auditable.
+
+| property | placed |
+|---|---|
+| `P36` capital | 276 |
+| `P276` location | 84 |
+| `P17` country *(flagged coarse)* | 79 |
+| `P131` / `P159` / `P2341` / `P1269` | 8 |
+
+Two deliberate refusals, both measured:
+
+- **`P30` continent is excluded.** It places 9 more and places every one badly — the Maya
+  civilization at the centroid of North America, in central Canada. A pin that wrong is worse
+  than no pin, because the map renders it with the same confidence as a real one.
+- **Multi-valued properties are split by direction.** Whether the values sit *inside* the
+  thing or *contain* it. Several capitals average to somewhere inside the polity (Tang's
+  Chang'an and Luoyang land in Tang China); several countries do not. Taking an arbitrary
+  first value put the **Great Depression in Hungary**. Capitals and locations take the
+  centroid; country is used only when singular. This costs 19 placements and is worth it —
+  the 21 arbitrary ones included the Great Depression, the House of Habsburg and the Iberian
+  Union, none of which should carry a single point.
+
+### Result
+
+```
+polities reaching narratives     923 -> 1,328 of 1,438
+narratives                     4,042 -> 4,447
+placed by derivation                    447 (79 coarse)
+dropped for want of geography    515 -> 128, now counted and ranked
+```
+
+The remaining 128 are largely genuine abstractions — Industrial Revolution, Paleolithic,
+Mannerism, the interwar period, "modern period" — plus royal houses spanning several
+countries. They now appear in a rank-ordered report at the end of the run, next to the
+existing top-narratives list.
+
+**Great Zimbabwe is a true source gap, not our bug.** It carries `archaeological site`, an
+allowed type, but has *no date property at all* — no `P571`, `P580`, `P576`, `P582`. The
+harvest gate is correct to drop it. It is a candidate for manual curation, not for a code fix.
+
+### Provenance is carried, not hidden
+
+`Narrative.via` is `'derived' | 'coarse' | undefined`. Derived anchors draw with a thinner
+stroke, country-derived ones fainter still, and entering such a story states in the breadcrumb
+that the location was inferred. Without this a derived point carries exactly the visual weight
+of a surveyed one, and silently equating them is how a map begins asserting things the source
+never said — the same concern behind the unbuilt coverage-honesty work in §23.
+
+### Not verified
+
+The derived-anchor styling and the breadcrumb caveat are typechecked and the data reaches the
+client (331 `derived`, 74 `coarse` in the shipped file), and derived narratives do render at
+correct locations — Aztec appears in southern Mexico. But the *fainter stroke* and the
+*caveat text* were not confirmed on screen: the preview pane software-rasterizes and its
+scroll handler times out, as recorded in §18. Confirm both on real hardware.
