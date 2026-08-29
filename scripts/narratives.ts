@@ -18,12 +18,14 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { gzipSync } from 'node:zlib';
 import { sparql, SplittableError } from './lib/sparql.ts';
 import { DELIBERATELY_EXCLUDED } from './lib/taxonomy.ts';
+import type { PolityLocation } from './locate-polities.ts';
 import type { EventRecord } from './lib/normalize.ts';
 import type { PolityRecord } from './harvest-polities.ts';
 import { centroid, convexHull, type Narrative } from '../src/lib/narratives.ts';
 
 const INPUTS = ['data/raw/p585.json', 'data/raw/p580.json'];
 const POLITIES = 'data/raw/polities.json';
+const LOCATIONS = 'data/raw/polity-locations.json';
 const OUT = 'data/raw/narratives.json';
 
 /** QIDs per SPARQL VALUES batch. */
@@ -293,6 +295,28 @@ async function main(): Promise<void> {
     if (p.c) ownCoord.set(p.q, p.c);
     if (p.o) openEnded.add(p.q);
   }
+
+  /**
+   * Coordinates derived one hop away, from `locate-polities.ts`.
+   *
+   * A third of the polity corpus carries no P625 and was silently discarded
+   * below for want of geography. These fill that gap through the capital, the
+   * location, or (flagged coarse) the country. Applied only where Wikidata
+   * itself said nothing, so a real coordinate always wins.
+   */
+  const derived = new Map<number, PolityLocation>();
+  try {
+    const raw = JSON.parse(await readFile(LOCATIONS, 'utf8')) as Record<string, PolityLocation>;
+    for (const [q, loc] of Object.entries(raw)) {
+      const n = Number(q);
+      if (ownCoord.has(n)) continue;
+      derived.set(n, loc);
+      ownCoord.set(n, loc.c);
+    }
+    console.log(`  ${derived.size.toLocaleString()} polities placed via derived coordinates`);
+  } catch {
+    console.log(`  (no ${LOCATIONS} — run \`npm run locate\` to place coordinate-less polities)`);
+  }
   console.log(`\n  ${resolved.size.toLocaleString()} narratives resolved\n`);
 
   // Direct membership: events and narratives that name this narrative as parent.
@@ -348,6 +372,7 @@ async function main(): Promise<void> {
   const narratives: Narrative[] = [];
   let excludedByType = 0;
   let outOfDomain = 0;
+  const noGeography: Resolved[] = [];
   for (const [q, r] of resolved) {
     /*
      * Narratives need curating too.
@@ -375,7 +400,15 @@ async function main(): Promise<void> {
     // beneath it. Without this the Mongol Empire and Srivijaya would vanish for
     // want of linked child events, which is precisely the wrong outcome.
     const points = beneath.length > 0 ? beneath : own ? [own] : [];
-    if (points.length === 0) continue;
+    /**
+     * Nothing to draw. Counted, because an unlogged `continue` here quietly
+     * discarded 515 of 1,438 polities — Tang, Chola, Maya, Qin — while the run
+     * still exited 0 and reported success.
+     */
+    if (points.length === 0) {
+      noGeography.push(r);
+      continue;
+    }
 
     const narrative: Narrative = {
       q,
@@ -389,6 +422,12 @@ async function main(): Promise<void> {
       depth: depthOf(q),
     };
     if (openEnded.has(q)) narrative.o = true;
+    // Only when the narrative is standing on its own derived point; once real
+    // member events supply a hull the derivation is no longer what you see.
+    if (beneath.length === 0) {
+      const loc = derived.get(q);
+      if (loc) narrative.via = loc.coarse ? 'coarse' : 'derived';
+    }
     if (r.d) narrative.d = r.d;
     if (r.w) narrative.w = r.w;
     const parents = r.parents.filter((p) => resolved.has(p));
@@ -408,6 +447,8 @@ async function main(): Promise<void> {
   narratives     ${narratives.length.toLocaleString()}
   excluded       ${excludedByType.toLocaleString()} (sports/awards/eclipse types)
   out of domain  ${outOfDomain.toLocaleString()} (geological / deep prehistory)
+  no geography   ${noGeography.length.toLocaleString()} (no coordinate, and nothing geolocated beneath)
+  derived point  ${narratives.filter((n) => n.via).length.toLocaleString()} (${narratives.filter((n) => n.via === 'coarse').length.toLocaleString()} coarse)
   roots          ${roots.length.toLocaleString()}
   with hull      ${narratives.filter((n) => n.hull).length.toLocaleString()}
   max depth      ${Math.max(0, ...narratives.map((n) => n.depth))}
@@ -415,6 +456,14 @@ async function main(): Promise<void> {
   gzipped        ${(gzipSync(Buffer.from(json)).length / 1024 / 1024).toFixed(2)} MB
   written        ${OUT}
 
+  most notable dropped for want of geography — REVIEW THIS LIST:
+  (each is a real topic the map cannot place; an era or art movement here is
+   expected, a polity here means locate-polities.ts needs another property)`);
+  for (const r of [...noGeography].sort((a, b) => b.r - a.r).slice(0, 20)) {
+    console.log(`    rank ${String(r.r).padStart(3)}  ${r.n.slice(0, 50)}`);
+  }
+
+  console.log(`
   top narratives by rank — REVIEW THIS LIST:
   (narratives are curated only by exclusion; anything that is not a chapter of
    history appearing here means a type still needs adding to taxonomy.ts)`);

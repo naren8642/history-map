@@ -186,8 +186,10 @@ export function MapView({
           'circle-radius': 7,
           'circle-color': '#ffffff',
           'circle-stroke-color': NARRATIVE_COLOR,
-          'circle-stroke-width': 2,
-          'circle-opacity': 0.95,
+          // A derived point is drawn thinner and a country centroid fainter
+          // still. Same hit target, visibly less assertion.
+          'circle-stroke-width': ['match', ['get', 'via'], 'coarse', 1, 'derived', 1.5, 2],
+          'circle-opacity': ['match', ['get', 'via'], 'coarse', 0.5, 'derived', 0.75, 0.95],
         },
       });
       m.addLayer({
@@ -415,7 +417,10 @@ export function MapView({
       features.push({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: n.c },
-        properties: { q: n.q, label: n.n, rank: n.r },
+        // `via` marks a point Wikidata never stated: derived from the capital
+        // or the country. Carried onto the feature so the anchor can look
+        // less certain than a real one.
+        properties: { q: n.q, label: n.n, rank: n.r, via: n.via ?? '' },
       });
     }
     source.setData({ type: 'FeatureCollection', features });

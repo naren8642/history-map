@@ -176,6 +176,15 @@ export function App() {
             <button onClick={() => setStory(null)}>‹ All stories</button>
             <span className="crumb-name">{activeStory.n}</span>
             {activeStory.d && <span className="muted small crumb-desc">{activeStory.d}</span>}
+            {activeStory.via && (
+              /* Wikidata gives this story no coordinate. Say so, rather than
+                 letting an inferred pin pass for a recorded one. */
+              <span className="muted small crumb-note">
+                {activeStory.via === 'coarse'
+                  ? 'Location approximate — placed by country, not recorded'
+                  : 'Location inferred from its capital, not recorded directly'}
+              </span>
+            )}
           </div>
         )}
         <p className="muted small">

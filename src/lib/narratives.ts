@@ -51,6 +51,17 @@ export interface Narrative {
   depth: number;
   /** No end date recorded. Render as "1050 – unknown", not a zero-length span. */
   o?: boolean;
+  /**
+   * Set when `c` is not where Wikidata says this is, because Wikidata does not
+   * say. `derived` followed the capital or the recorded location; `coarse` fell
+   * back to a country centroid. Absent means the point is the item's own P625
+   * or the centroid of real member events.
+   *
+   * The UI must distinguish these: a derived point carries the same visual
+   * weight as a surveyed one, and silently equating them is how a map starts
+   * asserting things the source never said.
+   */
+  via?: 'derived' | 'coarse';
 }
 
 /**

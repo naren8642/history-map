@@ -272,6 +272,8 @@ html, body, #root { height: 100%; margin: 0; }
   letter-spacing: -0.01em; margin-top: 2px;
 }
 .crumb-desc { display: block; font-style: italic; }
+/* Provenance caveat: quieter than the description it follows, but present. */
+.crumb-note { display: block; opacity: 0.75; }
 
 /* ---- timeline story bands ---- */
 
