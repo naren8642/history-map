@@ -1109,3 +1109,115 @@ single character. Bands keep their honest width; narrow ones put the name beside
   geographic cluster of members, would be truer.
 - Nothing yet marks how much of a period the story layer covers. In sparse regions and eras
   the map silently falls back to bare events, which is correct behaviour but reads as absence.
+
+---
+
+## 23. Current state and what comes next
+
+Written as a handoff. §1–22 record how each decision was reached; this section
+records where things stand and what is undecided.
+
+### Where the project stands
+
+Milestones 1–6 complete. `npm run data` runs the whole pipeline; `npm run dev` serves the app.
+
+```
+harvest (P585)      43,023 events        harvest (P580/P582)  33,943 events
+harvest polities     1,438 items         curated events       25,431
+narratives           4,042               baked summaries      19,412
+```
+
+The map leads with stories: labelled anchors over event clusters, entering one filters to its
+subtree and surfaces sub-stories on both map and timeline. Hover peeks into a cluster; click
+opens its full list. The timeline carries a non-linear axis, a free/fixed-width window, and
+story bands.
+
+### Decided but not yet built: LLM synthesis
+
+Chosen direction. The design as agreed:
+
+**Never let the model produce URLs.** A fabricated authoritative-looking citation is worse
+than none. Two verified sources instead:
+- **Wikidata's curated external IDs** — confirmed present on our narratives: Encyclopædia
+  Britannica, Polish PWN, Norwegian Lex, Google Knowledge Graph. Human-curated, free.
+- **Claude's server-side `web_search` / `web_fetch`** — these *retrieve*, so their URLs are
+  real rather than recalled.
+
+**The prerequisite is a story panel, not the hull fix.** Entering a story currently changes
+only a breadcrumb; there is nowhere for prose to live. Panel shape: title and span, then a
+visually distinct **generated overview** labelled as such, then sub-stories, then **Sources**.
+Generated text sits above in reading order and below in visual weight, so cited material stays
+primary — the same rule that keeps `BakedSummary.syn` a separate field from `x`.
+
+**Synthesis does not replace the coverage signal — it raises the stakes.** A fluent paragraph
+about the Mali Empire beside an empty map reads as *"this is covered"*. And thin-record history
+is where a model's recall is weakest and the reader's ability to check is lowest. The panel
+should state what it was written from: *"from 3 events in this dataset; the record for West
+Africa in this period is thin."*
+
+Cost at Opus 5 rates (~2k input / 350 output per narrative; ~9k input with search):
+
+| scope | count | no search | with search |
+|---|---|---|---|
+| all | 4,042 | ~$76 | ~$220 |
+| ≥5 events beneath | ~800 | ~$15 | ~$44 |
+| top 500 by rank | 500 | ~$9 | ~$28 |
+
+**Undecided: which scope.** Recommendation was ≥5 events with web search, or 20 hand-picked
+first to judge tone and accuracy before committing.
+
+### Decided but not yet built: Vital Articles discovery
+
+Our discovery is Wikidata-shaped — "what has coordinates, a date, and an allowlisted type?"
+A topic with an excellent Wikipedia article that fails any gate is invisible. **496 polities
+have no coordinate at all**: Tang dynasty, Vikings, Maya civilization, Great Depression.
+
+Wikipedia's **Vital Articles** hierarchy is a human-curated importance ranking that is *not*
+biased toward things that happen to have coordinates. Seeding from it inverts the question
+from "what does Wikidata have?" to "what are the major topics in world history?" — and then
+finding their data. Pairs naturally with synthesis, since a topic with no coordinate still has
+an article and can still be placed approximately.
+
+Licensing is not the obstacle: Wikipedia text is CC BY-SA, reuse with attribution is explicit,
+and we attribute on every panel. At our scale the API is fine (19,412 summaries in ~40 min);
+bulk work should use Wikimedia dumps rather than slow scraping.
+
+### Open work, roughly in priority order
+
+1. **Story panel** — prerequisite for synthesis; nowhere for prose today.
+2. **Coverage honesty** — say when a region/era is thin instead of letting absence read as fact.
+3. **Synthesis pass** — scope undecided (above).
+4. **Vital Articles seeding** — reaches the 496 coordinate-less polities.
+5. **Story-layer defects** — label anchor is the mean of members, so World War II is labelled
+   near Syria; convex hulls overstate extent, covering oceans a war never reached.
+6. **Milestone 7** — URL state (shareable "WWII, 1939–45, Normandy" links), keyboard nav,
+   mobile layout, empty/error states.
+7. **Operational (§20, still unbuilt)** — monthly scheduled refresh; fail CI on a nonzero
+   harvest `PROBLEMS` count; fail CI on unexplained notable losses from the curation diff.
+
+### Known gaps, with numbers
+
+- 496 polities have no Wikidata coordinate — unreachable by geographic harvest.
+- ~35 recurring sports series still leak into narratives; the top-40 review list is how they
+  surface. Great Zimbabwe has no date; Tang dynasty no coordinate.
+- 27,324 unreviewed event types after the span pass — `EXPANSION CANDIDATES` is the to-do list.
+- 286 events fail the sitelink QID check and are retried every prefetch run (~1 min wasted).
+- Pre-1500 coverage is 68% Western even after the polities pass. That is Wikidata; the
+  response is to say so, not to hide it.
+
+### Recurring failure modes in this project
+
+Worth keeping in view, because each cost real time and each recurred:
+
+- **Silent loss.** A truncated HTTP response dropped a decade while the run exited 0. Span
+  events were harvested for a whole milestone before anyone noticed curation never read their
+  file. 94% of polities vanished between two stages. All three were found by accident, which
+  is why `curate` now diffs against the previous run and `explain` exists.
+- **Order-dependence.** Arbitrary P31 choice, arbitrary category choice, arbitrary cluster
+  colour — each looked fine and each was irreproducible until an explicit precedence was added.
+- **Volume-ranked reports hide singletons.** Chernobyl, third in the corpus, sat unnoticed
+  under a type holding one event. Reports need an importance ordering as well as a count.
+- **Only rendering reveals rendering bugs.** Cluster colours misrepresenting their contents,
+  hulls greying out the map, six of eight story labels suppressed — none visible headless.
+- **Shared lists with divergent meanings.** One exclusion list read by two consumers turned
+  "route this elsewhere" into "drop this everywhere".
