@@ -250,6 +250,10 @@ function Legend({ events }: { events: HistoryEvent[] }) {
     return [...map.entries()].sort((a, b) => b[1] - a[1]);
   }, [events]);
 
+  // An empty legend still painted its panel — a small blank pill floating over
+  // the map wherever a story had no events. Nothing to say, so say nothing.
+  if (counts.length === 0) return null;
+
   return (
     <div className="panel panel--legend">
       {counts.map(([category, count]) => (
