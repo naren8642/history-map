@@ -302,14 +302,25 @@ async function main(): Promise<void> {
   let stopped: string | null = null;
 
   const queue = [...todo];
+  /**
+   * Ceiling reservation.
+   *
+   * Checking `spent` alone lets every worker pass the gate and then spend up to
+   * the per-story ceiling each — a $5 run finished at $6.21 on its first outing,
+   * because three calls were already in flight when the limit was crossed.
+   * Reserving the worst case before starting a call makes the stated ceiling
+   * the actual one.
+   */
+  let reserved = 0;
   async function worker(): Promise<void> {
     while (queue.length > 0 && !stopped) {
-      if (spent >= scope.runBudget) {
-        stopped = `run budget of $${scope.runBudget.toFixed(2)} reached`;
+      if (spent + reserved + BUDGET_PER_STORY_USD > scope.runBudget) {
+        stopped = `run budget of $${scope.runBudget.toFixed(2)} would be exceeded by the next story`;
         return;
       }
       const n = queue.shift();
       if (!n) return;
+      reserved += BUDGET_PER_STORY_USD;
 
       const beneath = beneathOf.get(n.q) ?? [];
       const links: Curated = { ...curated.get(n.q) };
@@ -368,6 +379,10 @@ async function main(): Promise<void> {
         failed++;
         const why = err instanceof NoOutputError ? err.message : err instanceof Error ? err.message : String(err);
         console.log(`  ✗ ${n.n.slice(0, 40).padEnd(42)} ${why.slice(0, 80)}`);
+      } finally {
+        // Exactly once, on every path — releasing inside `try` would double up
+        // when the write throws after a successful call.
+        reserved -= BUDGET_PER_STORY_USD;
       }
     }
   }
