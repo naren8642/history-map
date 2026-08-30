@@ -1163,6 +1163,9 @@ Cost at Opus 5 rates (~2k input / 350 output per narrative; ~9k input with searc
 | ≥5 events beneath | ~800 | ~$15 | ~$44 |
 | top 500 by rank | 500 | ~$9 | ~$28 |
 
+> **Wrong by about 8×. Measured figures in §25.** This table costed a single API
+> call. What runs is an agentic loop whose turns resend accumulated context.
+
 **Undecided: which scope.** Recommendation was ≥5 events with web search, or 20 hand-picked
 first to judge tone and accuracy before committing.
 
@@ -1319,3 +1322,87 @@ client (331 `derived`, 74 `coarse` in the shipped file), and derived narratives 
 correct locations — Aztec appears in southern Mexico. But the *fainter stroke* and the
 *caveat text* were not confirmed on screen: the preview pane software-rasterizes and its
 scroll handler times out, as recorded in §18. Confirm both on real hardware.
+
+
+## 25. The synthesis harness, and what the first 20 stories cost
+
+Built on the **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`), authenticated with the
+local Claude Code OAuth session. No API key is read or required. (If this were ever
+distributed, that changes: Anthropic does not permit third parties to offer claude.ai login to
+their own users without approval. A shipped version would need API keys.)
+
+### The citation rule is enforced, not requested
+
+§23 settled that the model never supplies a URL. A prompt asking for real URLs is a request, so
+the harness checks instead:
+
+- [`scripts/lib/agent.ts`](scripts/lib/agent.ts) records every URL appearing in any tool result
+  during a run.
+- [`scripts/synthesize.ts`](scripts/synthesize.ts) accepts a citation only if it is one of the
+  curated links we fetched ourselves — the Wikipedia article, or Britannica via `P1417`,
+  measured present on 157 of the top 200 narratives — or is in the retrieved set. Everything
+  else is discarded into `rejectedUrls`.
+- [`scripts/check-citations.ts`](scripts/check-citations.ts) exercises the collector offline,
+  because it is the guarantee the whole design rests on and a live run cannot prove it.
+
+**It caught one fabrication in 86 sources.** The Ottoman Empire entry cited
+`en.wikipedia.org/wiki/Millet_(Ottoman_Empire)` without ever retrieving it. That article
+exists — which is exactly why the check has to be mechanical rather than a plausibility read.
+1.2% is low enough to be easy to miss by eye and high enough to matter across hundreds.
+
+The harness also denies the model the repository: `WebSearch` and `WebFetch` only,
+`permissionMode: 'dontAsk'`, `settingSources: []` so no CLAUDE.md reaches a prompt about
+history.
+
+### Measured cost
+
+```
+20 stories   $8.04 total   avg $0.402   median $0.429   range $0.30 – $0.50
+```
+
+Projected from that average, against the §23 estimates:
+
+| scope | count | measured projection | §23 estimate |
+|---|---|---|---|
+| top 100 | 100 | $41 | — |
+| top 500 | 500 | $207 | ~$28 |
+| ≥5 events | 849 | $352 | ~$44 |
+| all | 4,447 | $1,842 | ~$220 |
+
+The next scope decision is a **$350 decision, not a $44 one**. Untested levers before
+committing: the SDK exposes `effort` (`low`–`max`), and `maxTurns` bounds the search loop.
+
+Two ceilings, both enforced by the SDK rather than by hoping: `$0.60` per story via
+`maxBudgetUsd`, and a run budget. **The run budget was wrong on its first outing** — a `$5` run
+spent `$6.21`, because checking `spent` alone let all three workers pass the gate on the last
+dollar and spend a per-story ceiling each. The worst case is now reserved before dispatch and
+released in `finally`.
+
+### The output is good, and it audits the dataset
+
+The `coverage` field was the part most likely to degenerate into boilerplate. It did not:
+
+> World War II: *"The dataset's 312 events lean heavily toward European and Anglo-American
+> military operations, so campaigns in China, Burma and the Dutch East Indies... are thinly
+> represented."*
+
+That is §19's Eurocentrism measurement, restated unprompted about our own data. Other entries
+name what would not load, distinguish uncertainty from rounding, and — for the Russo-Ukrainian
+war — separate *"official denials"* from *"an independent counter-record"*.
+
+**It also found a data error.** Ancient Egypt's coverage note flagged that our Battle of
+Carchemish is dated 604 BCE where the Babylonian Chronicle and most scholarship say 605 BCE.
+Checked: our event carries `s: -604`, taken unchanged from Wikidata's `-0604-01-01`
+(precision 9). Wikidata does not use astronomical year numbering, so that is 604 BCE — off by
+one, and faithfully propagated. Worth harvesting `coverage` fields for claims like this as more
+stories run; the synthesis pass doubles as a fact-check on the corpus.
+
+### What this does not solve
+
+**11 of the 20 have no events at all.** The Soviet Union piece is three good paragraphs that
+will land on a blank map, and its own coverage note says exactly that. The prose is now ready
+before the surface that holds it — so the story panel is the only thing between this work and
+a reader, and it is also the fix for the 1,265 dead ends found in §24. Build it before buying
+more prose: the format here (~2,700 characters of overview, ~900 of significance, ~700 of
+coverage) is an untested guess, and discovering it is wrong costs $8 at this scope and $352 at
+the next.
