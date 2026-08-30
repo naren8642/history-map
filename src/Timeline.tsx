@@ -13,11 +13,25 @@ interface Props {
   years: readonly number[];
   window: TimeWindow;
   onChange: (window: TimeWindow) => void;
+  /** Accretion playback transport. */
+  playing: boolean;
+  onTogglePlay: () => void;
+  /** Years per second. */
+  rate: number;
+  onRateChange: (rate: number) => void;
   /** Major stories to draw as spans above the axis. */
   bands?: Narrative[];
   activeBand?: number | null;
   onSelectBand?: (qid: number) => void;
 }
+
+/** Playback speeds in years per second. 15 reads as "watchful", 60 as "sweep". */
+const RATES: ReadonlyArray<{ label: string; value: number }> = [
+  { label: '½×', value: 7 },
+  { label: '1×', value: 15 },
+  { label: '2×', value: 30 },
+  { label: '4×', value: 60 },
+];
 
 const BIN_COUNT = 240;
 const MIN_WIDTH_YEARS = 1;
@@ -75,6 +89,10 @@ export function Timeline({
   years,
   window: win,
   onChange,
+  playing,
+  onTogglePlay,
+  rate,
+  onRateChange,
   bands = [],
   activeBand = null,
   onSelectBand,
@@ -98,7 +116,27 @@ export function Timeline({
   const [presetYears, setPresetYears] = useState<number | null>(null);
 
   const bins = useMemo(() => densityBins(years, scale, BIN_COUNT), [years, scale]);
-  const maxBin = useMemo(() => Math.max(1, ...bins), [bins]);
+
+  /**
+   * The density reads as a lit ridge, not a bar chart: a lightly smoothed
+   * area with a crest line the skin can set glowing. sqrt again, because a few
+   * bins hold orders of magnitude more events than the rest.
+   */
+  const ridge = useMemo(() => {
+    const smoothed = bins.map((_, i) => {
+      const a = bins[Math.max(0, i - 1)]!;
+      const b = bins[i]!;
+      const c = bins[Math.min(bins.length - 1, i + 1)]!;
+      return (a + 2 * b + c) / 4;
+    });
+    const top = Math.max(1, ...smoothed);
+    const pts = smoothed.map((v, i) => {
+      const h = v === 0 ? 0 : Math.max(2, (Math.sqrt(v) / Math.sqrt(top)) * 92);
+      return `${i + 0.5},${(100 - h).toFixed(1)}`;
+    });
+    const line = `M${pts.join('L')}`;
+    return { line, area: `M0.5,100L${pts.join('L')}L${BIN_COUNT - 0.5},100Z` };
+  }, [bins]);
 
   // Decide which ticks get text. Always label the last one so the axis states
   // where it ends, even if that means dropping its neighbour.
@@ -331,11 +369,35 @@ export function Timeline({
   return (
     <div className="timeline">
       <div className="timeline-head">
+        <button
+          className={playing ? 'play play--on' : 'play'}
+          onClick={onTogglePlay}
+          aria-label={playing ? 'Pause' : 'Play'}
+          title={playing ? 'Pause' : 'Play — watch history accrete'}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            {playing
+              ? <path d="M7 5h3.6v14H7zM13.4 5H17v14h-3.6z" />
+              : <path d="M8 5v14l11-7z" />}
+          </svg>
+        </button>
+        <span className="timeline-rates" role="group" aria-label="Playback speed">
+          {RATES.map((r) => (
+            <button
+              key={r.value}
+              className={r.value === rate ? 'rate rate--on' : 'rate'}
+              onClick={() => onRateChange(r.value)}
+              title={`${r.value} years per second`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </span>
         <span className="timeline-range">
-          {formatYearShort(win.from)} — {formatYearShort(win.to)}
+          {formatYearShort(Math.round(win.from))} — {formatYearShort(Math.round(win.to))}
         </span>
         <span className="muted small">
-          {widthYears.toLocaleString()} years
+          {Math.round(widthYears).toLocaleString()} years
           {presetYears === null && <span className="mode-hint"> · fixed width, adaptive span</span>}
         </span>
         <span className="timeline-presets">
@@ -385,13 +447,18 @@ export function Timeline({
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
+        {/* Everything left of the playhead has already burned. */}
+        <div className="burned" style={{ width: `${toFraction * 100}%` }} />
+
         <svg className="timeline-density" viewBox={`0 0 ${BIN_COUNT} 100`} preserveAspectRatio="none">
-          {bins.map((count, i) => {
-            // sqrt again here: a few bins hold orders of magnitude more events
-            // than the rest, and a linear bar chart would flatten everything else.
-            const h = count === 0 ? 0 : Math.max(2, (Math.sqrt(count) / Math.sqrt(maxBin)) * 100);
-            return <rect key={i} x={i} y={100 - h} width={1} height={h} className="density-bar" />;
-          })}
+          <defs>
+            <linearGradient id="dens-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="var(--dens-hi)" />
+              <stop offset="1" stopColor="var(--dens-lo)" />
+            </linearGradient>
+          </defs>
+          <path d={ridge.area} fill="url(#dens-grad)" />
+          <path d={ridge.line} className="density-crest" fill="none" vectorEffect="non-scaling-stroke" />
         </svg>
 
         <div className="timeline-ticks">

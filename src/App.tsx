@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { MapView, type MapApi } from './MapView.tsx';
 import { DetailPanel, GroupPanel } from './DetailPanel.tsx';
 import { StoryPanel } from './StoryPanel.tsx';
@@ -11,13 +11,9 @@ import {
   overlapsWindow,
   type Narrative,
 } from './lib/narratives.ts';
-import { buildTimeScale } from './lib/timescale.ts';
-import {
-  CATEGORY_COLOR,
-  CATEGORY_LABEL,
-  type Category,
-  type HistoryEvent,
-} from './types.ts';
+import { buildTimeScale, formatYearShort } from './lib/timescale.ts';
+import { SKINS, SKIN_ORDER, type SkinId } from './lib/skins.ts';
+import { CATEGORY_LABEL, type Category, type HistoryEvent } from './types.ts';
 
 /**
  * A click resolves to either one event or a stack of co-located ones. Keeping
@@ -31,60 +27,139 @@ type Selection =
 /** Opening view: the half-century with the densest, most recognisable coverage. */
 const INITIAL_WINDOW: TimeWindow = { from: 1900, to: 1950 };
 
-/**
- * How many stories to draw at once.
- *
- * 159 root narratives overlap the default window; drawing them all would bury
- * the map in overlapping hulls. Showing the most notable handful matches how
- * the event layer already budgets features, and the rest are reachable by
- * entering the story that contains them.
- */
+/** How many stories to draw at once; the rest are reachable by entering one. */
 const NARRATIVE_BUDGET = 8;
+
+/**
+ * Where a playback sweep begins: the early modern era, not 3000 BCE. Starting
+ * a replay at the domain's true edge means minutes of near-empty map before
+ * anything ignites — dramatic exactly once, tedious every time after.
+ */
+const SWEEP_START = 1700;
+
 
 export function App() {
   const { events, error } = useEvents();
   const narratives = useNarratives();
+
+  const [skinId, setSkinId] = useState<SkinId>('embers');
+  const skin = SKINS[skinId];
+
+  // The skin scopes the UI's CSS tokens; see styles.css.
+  useEffect(() => {
+    document.documentElement.dataset['skin'] = skinId;
+  }, [skinId]);
+
   /**
    * The route into the story layer, outermost first; empty at the top level.
-   *
-   * A path, not a single id, because containment is a DAG: the Second
-   * Sino-Japanese War sits under both World War II and the Pacific War, so
-   * there is no single ancestry to derive after the fact. Recording the route
-   * taken is the only way "back" can mean what the reader did.
+   * A path, not a single id, because containment is a DAG.
    */
   const [trail, setTrail] = useState<number[]>([]);
   const story = trail.length > 0 ? trail[trail.length - 1]! : null;
   const enterStory = useCallback((qid: number | null) => {
     setTrail((current) => {
       if (qid === null) return [];
-      // Re-entering a story already on the route ascends to it rather than
-      // pushing a second copy — cycles do occur in Wikidata.
       const seen = current.indexOf(qid);
       return seen === -1 ? [...current, qid] : current.slice(0, seen + 1);
     });
   }, []);
   const [selection, setSelection] = useState<Selection | null>(null);
-  const [viewport, setViewport] = useState({ visible: 0, zoom: 1.6, floor: 0 });
-  const [window, setWindow] = useState<TimeWindow>(INITIAL_WINDOW);
+  const [window_, setWindow] = useState<TimeWindow>(INITIAL_WINDOW);
+
+  /**
+   * Accretion playback. The window's `to` edge is the playhead; `from` trails
+   * it as the burn span. During play the whole window advances each frame —
+   * the map's paint expressions consume it directly, so this is the only state
+   * that moves per frame.
+   */
+  const [playing, setPlaying] = useState(false);
+  const [rate, setRate] = useState(15);
 
   const years = useMemo(() => (events ?? []).map((e) => e.s), [events]);
   const scale = useMemo(() => buildTimeScale(years), [years]);
 
-  /**
-   * The map's filter + re-index is the expensive part of a scrub, so it runs
-   * against a deferred copy of the window. The timeline's own readout, window
-   * box, and histogram stay on the immediate value and remain responsive while
-   * the map catches up.
-   */
-  const deferredWindow = useDeferredValue(window);
+  const windowRef = useRef(window_);
+  windowRef.current = window_;
 
-  // A span event overlaps the window if it starts before the window ends and
-  // ends after the window begins. For instant events s === e, so this reduces
-  // to a plain containment test.
-  const inWindow = useMemo(
-    () => (events ?? []).filter((e) => e.s < deferredWindow.to && e.e >= deferredWindow.from),
-    [events, deferredWindow],
-  );
+  useEffect(() => {
+    if (!playing) return;
+    let raf = 0;
+    let last = performance.now();
+    const end = scale.domain[1];
+    // Per-frame commits are affordable because the ember field takes time as
+    // a shader uniform; only the debounced heat/label pass touches tiles.
+    const tick = (now: number) => {
+      const dt = Math.min(0.1, (now - last) / 1000);
+      last = now;
+      const w = windowRef.current;
+      const span = w.to - w.from;
+      const to = w.to + rate * dt;
+      if (to >= end) {
+        setWindow({ from: end - span, to: end });
+        setPlaying(false);
+        return;
+      }
+      setWindow({ from: to - span, to });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, rate, scale]);
+
+  /**
+   * The opening: a beat after the data lands, the map starts burning forward
+   * from the early modern era on its own. The app does not wait to be asked to
+   * be interesting. Any hand on the scrubber (or the pause button) ends it.
+   */
+  const autoplayed = useRef(false);
+  useEffect(() => {
+    if (!events || autoplayed.current) return;
+    autoplayed.current = true;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    setWindow({ from: SWEEP_START, to: SWEEP_START + 50 });
+    const t = setTimeout(() => setPlaying(true), 1200);
+    return () => clearTimeout(t);
+  }, [events]);
+
+  const togglePlay = useCallback(() => {
+    setPlaying((p) => {
+      if (p) return false;
+      // Playing from the end restarts the sweep rather than doing nothing.
+      const w = windowRef.current;
+      const end = scale.domain[1];
+      if (w.to >= end - 1) {
+        const span = w.to - w.from;
+        setWindow({ from: SWEEP_START, to: SWEEP_START + span });
+      }
+      return true;
+    });
+  }, [scale]);
+
+  // Space plays and pauses, unless focus is somewhere keystrokes mean something.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'BUTTON' || t.tagName === 'TEXTAREA' || t.isContentEditable || t.getAttribute('role') === 'slider')) return;
+      e.preventDefault();
+      togglePlay();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [togglePlay]);
+
+  /** A hand on the scrubber always takes the clock back from the player. */
+  const onWindowChange = useCallback((next: TimeWindow) => {
+    setPlaying(false);
+    setWindow(next);
+  }, []);
+
+  /**
+   * The burning-set recomputations below are the expensive part of a scrub,
+   * so they run against a deferred copy of the window. The timeline and the
+   * year readout stay on the immediate value and remain responsive.
+   */
+  const deferredWindow = useDeferredValue(window_);
 
   const narrativeIndex = useMemo(
     () => buildNarrativeIndex(narratives ?? [], events ?? []),
@@ -99,19 +174,11 @@ export function App() {
     [trail, narrativeIndex],
   );
 
-  /**
-   * The whole subtree, not the window. The panel is describing the story, and
-   * a story does not become smaller because the timeline is looking elsewhere.
-   */
   const storyEventCount = useMemo(
     () => (activeStory ? eventsUnder(narrativeIndex, activeStory.q).length : 0),
     [activeStory, narrativeIndex],
   );
 
-  /**
-   * Stories to draw: the children of whatever we are inside, or the roots at
-   * the top level — filtered to the window and capped by notability.
-   */
   const visibleNarratives = useMemo(() => {
     const pool = activeStory
       ? narrativeIndex.childrenOf.get(activeStory.q) ?? []
@@ -122,11 +189,6 @@ export function App() {
       .slice(0, NARRATIVE_BUDGET);
   }, [activeStory, narrativeIndex, deferredWindow]);
 
-  /**
-   * Bands are chosen over the whole timeline domain, not the current window:
-   * they exist to show where the big stories *are*, including ones the window
-   * is not currently over.
-   */
   const bandNarratives = useMemo(() => {
     const pool = activeStory
       ? narrativeIndex.childrenOf.get(activeStory.q) ?? []
@@ -138,18 +200,29 @@ export function App() {
   }, [activeStory, narrativeIndex]);
 
   /**
-   * Entering a story narrows the map to its members. Its own events plus
-   * everything beneath its sub-stories — the whole subtree, so entering "World
-   * War II" shows the Pacific and Eastern Front battles too, not just the
-   * events wired directly to the top node.
+   * The map gets the whole story-scoped corpus, *unfiltered by time*. Under
+   * the accretion model time is a paint property, not a data property: the
+   * source is set once per story change and the clock never rebuilds it.
    */
-  const visibleEvents = useMemo(() => {
-    if (!activeStory) return inWindow;
+  const scopedEvents = useMemo(() => {
+    if (!activeStory) return events ?? [];
     const under = new Set(eventsUnder(narrativeIndex, activeStory.q).map((e) => e.q));
-    return inWindow.filter((e) => under.has(e.q));
-  }, [activeStory, narrativeIndex, inWindow]);
+    return (events ?? []).filter((e) => under.has(e.q));
+  }, [activeStory, narrativeIndex, events]);
 
-  const byQid = useMemo(() => new Map(visibleEvents.map((e) => [e.q, e])), [visibleEvents]);
+  /** Events currently burning — inside the window. Drives the census and selection. */
+  const burning = useMemo(
+    () => scopedEvents.filter((e) => e.s < deferredWindow.to && e.e >= deferredWindow.from),
+    [scopedEvents, deferredWindow],
+  );
+
+  /** Everything the playhead has passed: burning plus residue. */
+  const accretedCount = useMemo(
+    () => scopedEvents.reduce((n, e) => (e.s <= deferredWindow.to ? n + 1 : n), 0),
+    [scopedEvents, deferredWindow],
+  );
+
+  const byQid = useMemo(() => new Map(burning.map((e) => [e.q, e])), [burning]);
 
   const selectedEvent =
     selection?.kind === 'event' ? byQid.get(selection.qid) ?? null : null;
@@ -172,10 +245,6 @@ export function App() {
     mapApi.current = api;
   }, []);
 
-  const onViewportChange = useCallback((visible: number, zoom: number, floor: number) => {
-    setViewport({ visible, zoom, floor });
-  }, []);
-
   if (error) {
     return (
       <div className="fatal">
@@ -190,24 +259,42 @@ export function App() {
 
   return (
     <div className="app">
+      {/* The map takes the immediate window: its per-frame cost is a handful of
+          paint properties, and routing it through the deferred value let a
+          60fps playback starve the deferral until the map ran decades behind
+          the clock. The deferred copy still gates the expensive memos above. */}
       <MapView
-        events={visibleEvents}
+        key={skinId}
+        events={scopedEvents}
+        window={window_}
+        skin={skin}
         narratives={visibleNarratives}
         highlightNarrative={story}
         onSelectNarrative={enterStory}
         onMapApi={handleMapApi}
         onSelect={selectEvent}
         onSelectGroup={selectGroup}
-        onViewportChange={onViewportChange}
       />
 
       <header className={`panel panel--top${activeStory ? ' panel--top--story' : ''}`}>
-        <h1>History Map</h1>
-        <p className="muted small">
-          {visibleEvents.length.toLocaleString()}
-          {activeStory ? ' events in this story · ' : ' events in window · '}
-          {viewport.visible.toLocaleString()} shown · zoom {viewport.zoom.toFixed(1)} ·
-          floor {viewport.floor}
+        <div className="masthead">
+          <h1>History Map</h1>
+          <span className="skin-switch" role="group" aria-label="Skin">
+            {SKIN_ORDER.map((id) => (
+              <button
+                key={id}
+                className={id === skinId ? 'skin-btn skin-btn--on' : 'skin-btn'}
+                onClick={() => setSkinId(id)}
+              >
+                {SKINS[id].label}
+              </button>
+            ))}
+          </span>
+        </div>
+        <p className="muted small statline">
+          {burning.length.toLocaleString()}
+          {activeStory ? ' burning in this story' : ' burning'} ·{' '}
+          {accretedCount.toLocaleString()} ignited so far
         </p>
 
         {activeStory && (
@@ -222,7 +309,14 @@ export function App() {
         )}
       </header>
 
-      <Legend events={visibleEvents} />
+      <Legend events={burning} colors={skin.glow} />
+
+      <div className="year-readout" aria-hidden="true">
+        <div className="year-big">{formatYearShort(Math.round(window_.to))}</div>
+        <div className="year-sub">
+          burning <b>{formatYearShort(Math.round(window_.from))} – {formatYearShort(Math.round(window_.to))}</b>
+        </div>
+      </div>
 
       {selection?.kind === 'group' && groupEvents && (
         <GroupPanel
@@ -254,38 +348,41 @@ export function App() {
       <Timeline
         scale={scale}
         years={years}
-        window={window}
-        onChange={setWindow}
+        window={window_}
+        onChange={onWindowChange}
+        playing={playing}
+        onTogglePlay={togglePlay}
+        rate={rate}
+        onRateChange={setRate}
         bands={bandNarratives}
         activeBand={story}
         onSelectBand={(qid) => {
           enterStory(qid);
           const n = narrativeIndex.byQid.get(qid);
           // Bring the window to the story, otherwise selecting a band can
-          // leave the map empty because the story lies outside the window.
-          if (n) setWindow({ from: n.s, to: Math.max(n.e, n.s + 1) });
+          // leave the map cold because the story lies outside the burn.
+          if (n) onWindowChange({ from: n.s, to: Math.max(n.e, n.s + 1) });
         }}
       />
     </div>
   );
 }
 
-function Legend({ events }: { events: HistoryEvent[] }) {
+function Legend({ events, colors }: { events: HistoryEvent[]; colors: Record<Category, string> }) {
   const counts = useMemo(() => {
     const map = new Map<Category, number>();
     for (const e of events) map.set(e.g, (map.get(e.g) ?? 0) + 1);
     return [...map.entries()].sort((a, b) => b[1] - a[1]);
   }, [events]);
 
-  // An empty legend still painted its panel — a small blank pill floating over
-  // the map wherever a story had no events. Nothing to say, so say nothing.
+  // Nothing to say, so say nothing.
   if (counts.length === 0) return null;
 
   return (
     <div className="panel panel--legend">
       {counts.map(([category, count]) => (
         <div key={category} className="legend-row">
-          <span className="swatch" style={{ background: CATEGORY_COLOR[category] }} />
+          <span className="swatch" style={{ background: colors[category] }} />
           <span className="legend-label">{CATEGORY_LABEL[category]}</span>
           <span className="muted">{count.toLocaleString()}</span>
         </div>

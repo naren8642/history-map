@@ -1,14 +1,68 @@
+/*
+ * All colour lives in tokens, and tokens live under a skin. The bare :root
+ * block is the atlas (light) set; [data-skin='embers'] overrides it wholesale.
+ * Components never name a colour directly — that is what lets a skin be a
+ * data change (see src/lib/skins.ts for the map-side half of the contract).
+ */
 :root {
   --panel-bg: rgba(255, 255, 255, 0.94);
   --panel-border: rgba(0, 0, 0, 0.1);
   --text: #1d1d1f;
   --muted: #6b6b70;
+  --accent: #2f6f8f;
+  --accent-contrast: #ffffff;
+  --accent-weak: rgba(47, 111, 143, 0.08);
+  --accent-soft: rgba(47, 111, 143, 0.2);
+  --story: #4a5f73;
+  --story-weak: rgba(74, 95, 115, 0.14);
+  --story-mid: rgba(74, 95, 115, 0.5);
+  --dens-hi: rgba(150, 116, 76, 0.55);
+  --dens-lo: rgba(150, 116, 76, 0.08);
+  --dens-crest: rgba(122, 88, 52, 0.7);
+  --burned: linear-gradient(180deg, rgba(193, 118, 60, 0.14), rgba(193, 118, 60, 0.04));
+  --tick-line: rgba(0, 0, 0, 0.16);
+  --hairline: rgba(0, 0, 0, 0.06);
+  --code-bg: #f0f0f2;
+  --skeleton-a: #ececef;
+  --skeleton-b: #f6f6f8;
+  --swatch-ring: rgba(255, 255, 255, 0.9);
+  --shadow: 0 4px 18px rgba(0, 0, 0, 0.09);
+  --year-glow: none;
+  --display: 'Fraunces', Georgia, serif;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   color: var(--text);
 }
 
+/* The night set. Panels are darker than the map so the glow stays the hero. */
+:root[data-skin='embers'] {
+  --panel-bg: rgba(9, 13, 21, 0.86);
+  --panel-border: rgba(150, 190, 240, 0.14);
+  --text: #e9eef7;
+  --muted: rgba(233, 238, 247, 0.55);
+  --accent: #ff8a4c;
+  --accent-contrast: #14100b;
+  --accent-weak: rgba(255, 138, 76, 0.1);
+  --accent-soft: rgba(255, 138, 76, 0.28);
+  --story: #8fb6e0;
+  --story-weak: rgba(143, 182, 224, 0.14);
+  --story-mid: rgba(143, 182, 224, 0.45);
+  --dens-hi: rgba(255, 148, 84, 0.34);
+  --dens-lo: rgba(150, 70, 110, 0.05);
+  --dens-crest: rgba(255, 190, 140, 0.75);
+  --burned: linear-gradient(180deg, rgba(255, 150, 84, 0.2), rgba(200, 80, 90, 0.05));
+  --tick-line: rgba(150, 190, 240, 0.18);
+  --hairline: rgba(150, 190, 240, 0.1);
+  --code-bg: rgba(150, 190, 240, 0.12);
+  --skeleton-a: rgba(150, 190, 240, 0.1);
+  --skeleton-b: rgba(150, 190, 240, 0.18);
+  --swatch-ring: rgba(6, 9, 15, 0.9);
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
+  --year-glow: 0 0 34px rgba(255, 130, 70, 0.35);
+}
+
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
+:root[data-skin='embers'] body { background: #04060c; }
 
 .app { position: relative; height: 100%; }
 .map { position: absolute; inset: 0; }
@@ -19,13 +73,23 @@ html, body, #root { height: 100%; margin: 0; }
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: 10px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.09);
-  backdrop-filter: blur(6px);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
+  color: var(--text);
 }
 
 .panel--top { top: 12px; left: 12px; padding: 12px 16px; max-width: 340px; }
-.panel--top h1 { margin: 0 0 4px; font-size: 17px; letter-spacing: -0.01em; }
+.panel--top h1 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
+.masthead { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
 .window { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+
+.skin-switch { margin-left: auto; display: flex; gap: 3px; }
+.skin-btn {
+  border: 1px solid var(--panel-border); background: none; color: var(--muted);
+  font: inherit; font-size: 10.5px; padding: 2px 8px; border-radius: 999px; cursor: pointer;
+}
+.skin-btn:hover { color: var(--text); }
+.skin-btn--on { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
 
 .panel--legend {
   bottom: 28px; left: 12px; padding: 10px 12px;
@@ -33,14 +97,15 @@ html, body, #root { height: 100%; margin: 0; }
 }
 .legend-row { display: flex; align-items: center; gap: 7px; }
 .legend-label { flex: 1; }
-.swatch { width: 11px; height: 11px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.9); }
+.swatch { width: 11px; height: 11px; border-radius: 50%; border: 1px solid var(--swatch-ring); }
+:root[data-skin='embers'] .swatch { box-shadow: 0 0 8px 0 currentColor; }
 
 .panel--detail {
   top: 12px; right: 56px; width: 310px; padding: 16px 18px 18px;
 }
 .panel--detail h2 { margin: 2px 0 8px; font-size: 17px; line-height: 1.25; }
 .eyebrow { margin: 0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
-.panel--detail a { display: inline-block; margin-top: 10px; font-size: 13px; color: #2f6f8f; }
+.panel--detail a { display: inline-block; margin-top: 10px; font-size: 13px; color: var(--accent); }
 .stub { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--panel-border); font-style: italic; }
 
 .close {
@@ -56,9 +121,27 @@ html, body, #root { height: 100%; margin: 0; }
 
 .fatal { padding: 48px; max-width: 560px; font-size: 15px; }
 .fatal h1 { font-size: 19px; }
-.hint code { background: #f0f0f2; padding: 1px 5px; border-radius: 4px; }
+.hint code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
 
 .maplibregl-ctrl-attrib { font-size: 10px; }
+
+/* ---- the year readout: the accretion clock, writ large ---- */
+
+.year-readout {
+  position: absolute; z-index: 2; right: 16px; bottom: 186px;
+  pointer-events: none; user-select: none; text-align: right;
+}
+.year-big {
+  font-family: var(--display); font-weight: 300; font-size: 58px; line-height: 0.95;
+  letter-spacing: 0.01em; color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-shadow: var(--year-glow);
+}
+.year-sub {
+  margin-top: 7px; font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--muted);
+}
+.year-sub b { color: var(--accent); font-weight: 500; }
 
 /* ---- timeline ---- */
 
@@ -69,26 +152,46 @@ html, body, #root { height: 100%; margin: 0; }
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: 10px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
-  backdrop-filter: blur(6px);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
   padding: 9px 14px 6px;
   user-select: none;
+  color: var(--text);
 }
 
 .timeline-head {
-  display: flex; align-items: baseline; gap: 10px;
+  display: flex; align-items: center; gap: 10px;
   margin-bottom: 7px;
 }
 .timeline-range { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
 .timeline-presets { margin-left: auto; display: flex; gap: 5px; }
 
+.play {
+  width: 30px; height: 30px; border-radius: 50%; flex: none; cursor: pointer;
+  border: 1px solid var(--accent-soft); background: var(--accent-weak); color: var(--accent);
+  display: flex; align-items: center; justify-content: center; padding: 0;
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+.play:hover { transform: scale(1.06); }
+.play:active { transform: scale(0.96); }
+.play svg { width: 13px; height: 13px; fill: currentColor; }
+.play--on { background: var(--accent); color: var(--accent-contrast); box-shadow: 0 0 18px -2px var(--accent-soft); }
+
+.timeline-rates { display: flex; gap: 2px; }
+.rate {
+  border: 0; background: none; color: var(--muted); font: inherit; font-size: 11px;
+  padding: 2px 6px; border-radius: 5px; cursor: pointer;
+}
+.rate:hover { color: var(--text); }
+.rate--on { background: var(--accent); color: var(--accent-contrast); }
+
 .preset {
   border: 1px solid var(--panel-border);
-  background: #fff; color: var(--muted);
+  background: none; color: var(--muted);
   font-size: 11px; padding: 3px 9px; border-radius: 999px; cursor: pointer;
 }
 .preset:hover { color: var(--text); }
-.preset--on { background: #2f6f8f; border-color: #2f6f8f; color: #fff; }
+.preset--on { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
 
 .timeline-track {
   position: relative;
@@ -97,17 +200,28 @@ html, body, #root { height: 100%; margin: 0; }
   touch-action: none;
 }
 
+/* What the playhead has passed reads warm: the burned part of the record. */
+.burned {
+  position: absolute; top: 0; bottom: 18px; left: 0;
+  background: var(--burned);
+  pointer-events: none;
+  border-radius: 2px;
+}
+
 .timeline-density {
   position: absolute; inset: 0 0 18px 0;
   width: 100%; height: calc(100% - 18px);
 }
-.density-bar { fill: #c9d2d8; }
+.density-crest { stroke: var(--dens-crest); stroke-width: 1.2; }
+:root[data-skin='embers'] .density-crest {
+  filter: drop-shadow(0 0 6px rgba(255, 130, 70, 0.8));
+}
 
 .timeline-ticks { position: absolute; inset: 0; pointer-events: none; }
 .tick { position: absolute; top: 0; bottom: 0; }
 .tick-line {
   position: absolute; top: 0; bottom: 18px; left: 0;
-  border-left: 1px dashed rgba(0, 0, 0, 0.16);
+  border-left: 1px dashed var(--tick-line);
 }
 .tick-label {
   position: absolute; bottom: 0; left: 0;
@@ -120,14 +234,14 @@ html, body, #root { height: 100%; margin: 0; }
 
 .timeline-window {
   position: absolute; top: 0; bottom: 18px;
-  background: rgba(47, 111, 143, 0.2);
-  border: 1.5px solid #2f6f8f;
+  background: var(--accent-weak);
+  border: 1.5px solid var(--accent);
   border-radius: 3px;
   cursor: grab;
   min-width: 3px;
 }
-.timeline-window:focus-visible { outline: 2px solid #2f6f8f; outline-offset: 2px; }
-.timeline-window--drag { cursor: grabbing; background: rgba(47, 111, 143, 0.3); }
+.timeline-window:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.timeline-window--drag { cursor: grabbing; background: var(--accent-soft); }
 
 .handle {
   position: absolute; top: -2px; bottom: -2px; width: 11px;
@@ -137,7 +251,7 @@ html, body, #root { height: 100%; margin: 0; }
   content: ''; position: absolute; top: 50%; left: 50%;
   transform: translate(-50%, -50%);
   width: 3px; height: 20px; border-radius: 2px;
-  background: #2f6f8f; border: 1px solid #fff;
+  background: var(--accent); border: 1px solid var(--swatch-ring);
 }
 .handle--from { left: -6px; }
 .handle--to { right: -6px; }
@@ -150,12 +264,12 @@ html, body, #root { height: 100%; margin: 0; }
 /* ---- detail panel ---- */
 
 .panel--detail { max-height: calc(100vh - 150px); overflow-y: auto; }
-.panel--detail:focus-visible { outline: 2px solid #2f6f8f; outline-offset: 2px; }
+.panel--detail:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .detail-head { display: flex; align-items: center; gap: 8px; margin: -4px -4px 4px 0; }
 .back {
   border: 0; background: none; padding: 2px 4px; cursor: pointer;
-  font-size: 12px; color: #2f6f8f; margin-right: auto;
+  font-size: 12px; color: var(--accent); margin-right: auto;
 }
 .back:hover { text-decoration: underline; }
 .detail-head .close { position: static; margin-left: auto; }
@@ -163,13 +277,13 @@ html, body, #root { height: 100%; margin: 0; }
 .description { margin: 0 0 10px; font-size: 13px; color: var(--muted); font-style: italic; }
 .thumb {
   width: 100%; max-height: 165px; object-fit: cover;
-  border-radius: 6px; margin: 2px 0 10px; display: block; background: #eee;
+  border-radius: 6px; margin: 2px 0 10px; display: block; background: var(--code-bg);
 }
 .extract { margin: 0; font-size: 13.5px; line-height: 1.5; }
 .note { margin: 8px 0 0; }
 
 .detail-links { display: flex; gap: 14px; align-items: baseline; margin-top: 12px; }
-.detail-links a { font-size: 13px; color: #2f6f8f; text-decoration: none; }
+.detail-links a { font-size: 13px; color: var(--accent); text-decoration: none; }
 .detail-links a:hover { text-decoration: underline; }
 .detail-links .secondary { font-size: 12px; color: var(--muted); }
 
@@ -183,7 +297,7 @@ html, body, #root { height: 100%; margin: 0; }
 .skeleton { margin-top: 12px; display: flex; flex-direction: column; gap: 7px; }
 .skeleton span {
   height: 10px; border-radius: 3px;
-  background: linear-gradient(90deg, #ececef 25%, #f6f6f8 50%, #ececef 75%);
+  background: linear-gradient(90deg, var(--skeleton-a) 25%, var(--skeleton-b) 50%, var(--skeleton-a) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.2s ease-in-out infinite;
 }
@@ -195,13 +309,13 @@ html, body, #root { height: 100%; margin: 0; }
 
 .panel--group .eyebrow { color: var(--text); }
 .group-list { list-style: none; margin: 12px 0 0; padding: 0; }
-.group-list li + li { border-top: 1px solid rgba(0,0,0,0.06); }
+.group-list li + li { border-top: 1px solid var(--hairline); }
 .group-list button {
   display: flex; align-items: center; gap: 8px; width: 100%;
   border: 0; background: none; padding: 7px 2px; cursor: pointer;
   text-align: left; font-size: 13px; color: var(--text); font-family: inherit;
 }
-.group-list button:hover { background: rgba(47,111,143,0.07); }
+.group-list button:hover { background: var(--accent-weak); }
 .group-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 
@@ -209,41 +323,41 @@ html, body, #root { height: 100%; margin: 0; }
   .skeleton span { animation: none; }
 }
 
-/* ---- cluster hover peek ---- */
+/* ---- glow hover peek ---- */
 
 .map-wrap { position: absolute; inset: 0; }
 
 .peek {
   position: absolute;
   z-index: 4;
-  /* Never intercept the hover it depends on. This is what removes the flicker
-     and the reach problem in one line. */
+  /* Never intercept the hover it depends on. */
   pointer-events: none;
-  transform: translate(-50%, calc(-100% - 18px));
-  min-width: 190px; max-width: 290px;
+  transform: translate(18px, -50%);
+  min-width: 210px; max-width: 300px;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: 9px;
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.16);
-  backdrop-filter: blur(6px);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
   padding: 5px;
   font-size: 12.5px;
+  color: var(--text);
 }
-/* Little pointer toward the cluster it describes. */
-.peek::after {
-  content: ''; position: absolute; left: 50%; bottom: -6px;
-  transform: translateX(-50%) rotate(45deg);
-  width: 10px; height: 10px;
-  background: var(--panel-bg);
-  border-right: 1px solid var(--panel-border);
+
+.peek-head {
+  margin: 0; padding: 4px 7px 5px;
   border-bottom: 1px solid var(--panel-border);
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--accent);
 }
 
 .peek-list { list-style: none; margin: 0; padding: 0; }
 .peek-list li {
-  display: flex; align-items: center; gap: 7px;
+  display: flex; align-items: baseline; gap: 7px;
   padding: 4px 7px; color: var(--text);
 }
+.peek-list .dot { align-self: center; }
+.peek-year { font-variant-numeric: tabular-nums; font-size: 11px; color: var(--muted); flex: none; min-width: 32px; }
 .peek-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .peek-more {
@@ -253,26 +367,16 @@ html, body, #root { height: 100%; margin: 0; }
 }
 
 .zoom-to {
-  border: 1px solid var(--panel-border); background: #fff;
+  border: 1px solid var(--panel-border); background: none;
   border-radius: 999px; padding: 3px 10px; cursor: pointer;
-  font: inherit; font-size: 11.5px; color: #2f6f8f; margin-left: 8px;
+  font: inherit; font-size: 11.5px; color: var(--accent); margin-left: 8px;
 }
-.zoom-to:hover { background: rgba(47, 111, 143, 0.08); }
+.zoom-to:hover { background: var(--accent-weak); }
 
 /* ---- story panel ---- */
 
-/*
- * The story panel lives inside the top-left panel because that panel already
- * answers "where am I". A second floating card would have to fight the detail
- * panel on the right, which can be open at the same time.
- */
 .panel--top { max-height: calc(100vh - 200px); overflow-y: auto; }
-/*
- * With a story open the panel is tall enough to reach the legend, which sits
- * at bottom:172px in the same column and was drawing over the prose. Ten
- * categories is the most the legend can show, at ~18px a row plus padding, so
- * 364px clears its worst case rather than its usual one.
- */
+/* With a story open the panel must clear the legend below it. */
 .panel--top--story { max-height: calc(100vh - 364px); }
 
 .story { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--panel-border); }
@@ -288,69 +392,151 @@ html, body, #root { height: 100%; margin: 0; }
 .trail { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px; font-size: 11.5px; }
 .trail button {
   border: 0; background: none; padding: 0; cursor: pointer;
-  font: inherit; color: #2f6f8f;
+  font: inherit; color: var(--accent);
 }
 .trail button:hover { text-decoration: underline; }
 .trail-sep { color: var(--muted); margin: 0 3px; }
 
-/*
- * Generated prose is set below cited prose in weight, never above it. It reads
- * first because that is what the reader came for; it must never look more
- * authoritative than the sources listed under it.
- */
+/* Generated prose is set below cited prose in weight, never above it. */
 .generated-label {
   margin: 12px 0 6px; font-size: 10.5px; letter-spacing: 0.02em;
   color: var(--muted); font-style: italic;
 }
-.generated { margin: 0 0 9px; font-size: 13px; line-height: 1.55; color: #303034; }
+.generated { margin: 0 0 9px; font-size: 13px; line-height: 1.55; color: var(--text); }
 
 /* The honesty mechanism, marked so it is not read as body prose. */
 .coverage {
   margin: 0; padding: 8px 10px; font-size: 12px; line-height: 1.5;
-  color: #4a4a50; background: rgba(47, 111, 143, 0.06);
-  border-left: 2px solid rgba(47, 111, 143, 0.35); border-radius: 0 4px 4px 0;
+  color: var(--text); background: var(--accent-weak);
+  border-left: 2px solid var(--accent-soft); border-radius: 0 4px 4px 0;
 }
 
 .sources { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
 .sources li { margin-bottom: 5px; line-height: 1.4; }
-.sources a { color: #2f6f8f; text-decoration: none; }
+.sources a { color: var(--accent); text-decoration: none; }
 .sources a:hover { text-decoration: underline; }
 .sources .via { color: var(--muted); font-size: 11px; }
 
-.story-count { margin: 0; font-size: 12.5px; line-height: 1.5; color: #4a4a50; }
+.story-count { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text); }
 
 .substories { list-style: none; margin: 0; padding: 0; }
-.substories li + li { border-top: 1px solid rgba(0, 0, 0, 0.06); }
+.substories li + li { border-top: 1px solid var(--hairline); }
 .substories button {
   display: flex; align-items: baseline; gap: 8px; width: 100%;
   border: 0; background: none; padding: 5px 4px; cursor: pointer;
-  font: inherit; text-align: left; border-radius: 4px;
+  font: inherit; color: var(--text); text-align: left; border-radius: 4px;
 }
-.substories button:hover { background: rgba(47, 111, 143, 0.08); }
+.substories button:hover { background: var(--accent-weak); }
 .substory-name { flex: 1; font-size: 12.5px; }
 .substory-meta { font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+/* ---- the embers register: frameless, cinematic ----
+ *
+ * The night skin removes chrome rather than recoloring it. Panels dissolve
+ * into the map; type goes uppercase and letterspaced; the timeline becomes a
+ * gradient shelf at the foot of the frame. Cards that genuinely float above
+ * content (detail, group, peek) keep their surfaces.
+ */
+
+.map-veil { display: none; }
+:root[data-skin='embers'] .map-veil {
+  display: block;
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background:
+    radial-gradient(90% 70% at 46% 38%, rgba(28, 56, 104, 0.12), rgba(28, 56, 104, 0) 60%),
+    radial-gradient(120% 100% at 50% 44%, rgba(0, 0, 0, 0) 52%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+:root[data-skin='embers'] .panel--top {
+  background: none; border: none; box-shadow: none; backdrop-filter: none;
+  padding: 22px 26px; max-width: 420px;
+}
+:root[data-skin='embers'] .panel--top h1 {
+  font-family: var(--display); font-weight: 300; font-size: 24px;
+  text-transform: uppercase; letter-spacing: 0.3em; padding-right: 0.3em;
+  background: linear-gradient(96deg, #ffd9a8 0%, #ff8a4c 44%, #ff5a32 78%, #c93f6e 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+:root[data-skin='embers'] .statline {
+  text-transform: uppercase; letter-spacing: 0.15em; font-size: 10.5px;
+  color: rgba(255, 176, 128, 0.6);
+}
+:root[data-skin='embers'] .skin-btn { border-color: transparent; }
+
+:root[data-skin='embers'] .panel--legend {
+  left: auto; right: 16px; bottom: 186px;
+  background: none; border: none; box-shadow: none; backdrop-filter: none;
+  align-items: flex-end; gap: 9px;
+}
+:root[data-skin='embers'] .legend-row {
+  flex-direction: row-reverse;
+  text-transform: uppercase; letter-spacing: 0.12em; font-size: 10.5px;
+}
+:root[data-skin='embers'] .legend-row .swatch { width: 7px; height: 7px; border: none; }
+:root[data-skin='embers'] .legend-label { flex: none; }
+
+:root[data-skin='embers'] .year-readout { left: 26px; right: auto; text-align: left; }
+:root[data-skin='embers'] .year-big { font-size: 74px; font-weight: 200; }
+
+:root[data-skin='embers'] .timeline {
+  left: 0; right: 0; bottom: 0; border-radius: 0;
+  background: linear-gradient(to top, rgba(4, 6, 12, 0.96) 26%, rgba(4, 6, 12, 0.8) 62%, rgba(4, 6, 12, 0) 100%);
+  border: none; box-shadow: none; backdrop-filter: none;
+  padding: 14px 26px 10px;
+}
+:root[data-skin='embers'] .timeline-head {
+  text-transform: uppercase; letter-spacing: 0.14em; font-size: 11px;
+}
+:root[data-skin='embers'] .timeline-range { font-size: 12.5px; letter-spacing: 0.14em; white-space: nowrap; }
+:root[data-skin='embers'] .timeline-head .muted.small { white-space: nowrap; }
+:root[data-skin='embers'] .mode-hint { display: none; }
+
+/* MapLibre's stock white controls read as dashboard; dim them into the night. */
+:root[data-skin='embers'] .maplibregl-ctrl-group {
+  background: rgba(9, 13, 21, 0.78);
+  box-shadow: 0 0 0 1px rgba(150, 190, 240, 0.16);
+}
+:root[data-skin='embers'] .maplibregl-ctrl-group button { filter: invert(0.88); }
+:root[data-skin='embers'] .maplibregl-ctrl-attrib {
+  background: rgba(4, 6, 12, 0.55); color: rgba(233, 238, 247, 0.45);
+}
+:root[data-skin='embers'] .maplibregl-ctrl-attrib a { color: rgba(233, 238, 247, 0.55); }
+:root[data-skin='embers'] .preset {
+  border-color: transparent; letter-spacing: 0.1em; font-size: 10.5px;
+}
+:root[data-skin='embers'] .preset--on { background: var(--accent-soft); color: var(--text); }
+:root[data-skin='embers'] .band {
+  background: rgba(150, 190, 240, 0.07); border-color: transparent;
+  color: var(--muted); letter-spacing: 0.08em;
+}
+:root[data-skin='embers'] .band--on { background: var(--accent-soft); color: var(--text); }
+:root[data-skin='embers'] .tick-line { border-left-color: rgba(150, 190, 240, 0.1); }
+:root[data-skin='embers'] .timeline-window {
+  border-width: 1px; border-color: rgba(255, 190, 150, 0.4);
+  background: rgba(255, 255, 255, 0.04);
+}
 
 /* ---- timeline story bands ---- */
 
 .timeline-bands { position: relative; margin-bottom: 5px; }
 .band {
   position: absolute; height: 15px;
-  border: 1px solid rgba(74, 95, 115, 0.5);
-  background: rgba(74, 95, 115, 0.14);
+  border: 1px solid var(--story-mid);
+  background: var(--story-weak);
   border-radius: 3px; padding: 0 5px;
-  cursor: pointer; overflow: hidden;
+  cursor: pointer; overflow: visible;
   display: flex; align-items: center;
-  font: inherit; font-size: 10px; color: #3c4b5a;
+  font: inherit; font-size: 10px; color: var(--text);
   white-space: nowrap;
 }
-.band:hover { background: rgba(74, 95, 115, 0.26); }
-.band--on { background: #4a5f73; border-color: #4a5f73; color: #fff; }
+.band:hover { background: var(--story-mid); }
+.band--on { background: var(--story); border-color: var(--story); color: var(--panel-bg); }
+:root[data-skin='embers'] .band--on { color: #0a0e16; }
 .band-label { overflow: hidden; text-overflow: ellipsis; }
 /* Narrow bands keep their true width and put the name beside them. */
-.band { overflow: visible; }
 .band-label--out {
   position: absolute; left: calc(100% + 4px); top: 50%;
   transform: translateY(-50%);
-  color: #3c4b5a; pointer-events: none; overflow: visible;
+  color: var(--muted); pointer-events: none; overflow: visible;
 }
-.band--on .band-label--out { color: #2f6f8f; font-weight: 650; }
+.band--on .band-label--out { color: var(--accent); font-weight: 650; }
