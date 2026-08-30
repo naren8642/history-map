@@ -259,21 +259,76 @@ html, body, #root { height: 100%; margin: 0; }
 }
 .zoom-to:hover { background: rgba(47, 111, 143, 0.08); }
 
-/* ---- story breadcrumb ---- */
+/* ---- story panel ---- */
 
-.breadcrumb { margin: 2px 0 6px; }
-.breadcrumb button {
+/*
+ * The story panel lives inside the top-left panel because that panel already
+ * answers "where am I". A second floating card would have to fight the detail
+ * panel on the right, which can be open at the same time.
+ */
+.panel--top { max-height: calc(100vh - 200px); overflow-y: auto; }
+/*
+ * With a story open the panel is tall enough to reach the legend, which sits
+ * at bottom:172px in the same column and was drawing over the prose. Ten
+ * categories is the most the legend can show, at ~18px a row plus padding, so
+ * 364px clears its worst case rather than its usual one.
+ */
+.panel--top--story { max-height: calc(100vh - 364px); }
+
+.story { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--panel-border); }
+.story h2 { margin: 4px 0 2px; font-size: 16px; line-height: 1.25; letter-spacing: -0.01em; }
+.story h3 {
+  margin: 14px 0 5px; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
+}
+.story-span { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.story-desc { margin: 0 0 8px; font-size: 12.5px; font-style: italic; color: var(--muted); }
+.story-caveat { margin: 6px 0 0; opacity: 0.85; }
+
+.trail { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px; font-size: 11.5px; }
+.trail button {
   border: 0; background: none; padding: 0; cursor: pointer;
-  font: inherit; font-size: 11.5px; color: #2f6f8f;
+  font: inherit; color: #2f6f8f;
 }
-.breadcrumb button:hover { text-decoration: underline; }
-.crumb-name {
-  display: block; font-size: 15px; font-weight: 650;
-  letter-spacing: -0.01em; margin-top: 2px;
+.trail button:hover { text-decoration: underline; }
+.trail-sep { color: var(--muted); margin: 0 3px; }
+
+/*
+ * Generated prose is set below cited prose in weight, never above it. It reads
+ * first because that is what the reader came for; it must never look more
+ * authoritative than the sources listed under it.
+ */
+.generated-label {
+  margin: 12px 0 6px; font-size: 10.5px; letter-spacing: 0.02em;
+  color: var(--muted); font-style: italic;
 }
-.crumb-desc { display: block; font-style: italic; }
-/* Provenance caveat: quieter than the description it follows, but present. */
-.crumb-note { display: block; opacity: 0.75; }
+.generated { margin: 0 0 9px; font-size: 13px; line-height: 1.55; color: #303034; }
+
+/* The honesty mechanism, marked so it is not read as body prose. */
+.coverage {
+  margin: 0; padding: 8px 10px; font-size: 12px; line-height: 1.5;
+  color: #4a4a50; background: rgba(47, 111, 143, 0.06);
+  border-left: 2px solid rgba(47, 111, 143, 0.35); border-radius: 0 4px 4px 0;
+}
+
+.sources { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
+.sources li { margin-bottom: 5px; line-height: 1.4; }
+.sources a { color: #2f6f8f; text-decoration: none; }
+.sources a:hover { text-decoration: underline; }
+.sources .via { color: var(--muted); font-size: 11px; }
+
+.story-count { margin: 0; font-size: 12.5px; line-height: 1.5; color: #4a4a50; }
+
+.substories { list-style: none; margin: 0; padding: 0; }
+.substories li + li { border-top: 1px solid rgba(0, 0, 0, 0.06); }
+.substories button {
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  border: 0; background: none; padding: 5px 4px; cursor: pointer;
+  font: inherit; text-align: left; border-radius: 4px;
+}
+.substories button:hover { background: rgba(47, 111, 143, 0.08); }
+.substory-name { flex: 1; font-size: 12.5px; }
+.substory-meta { font-size: 11px; color: var(--muted); white-space: nowrap; }
 
 /* ---- timeline story bands ---- */
 

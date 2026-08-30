@@ -1406,3 +1406,69 @@ a reader, and it is also the fix for the 1,265 dead ends found in §24. Build it
 more prose: the format here (~2,700 characters of overview, ~900 of significance, ~700 of
 coverage) is an untested guess, and discovering it is wrong costs $8 at this scope and $352 at
 the next.
+
+
+## 26. The story panel
+
+Entering a story used to change only a breadcrumb. §24 found 1,265 stories with nothing
+beneath them, and the screen recording showed what that meant: Russian Empire → Grand Duchy of
+Finland → a blank map, two clicks into nothing with no explanation. The synthesized prose from
+§25 had nowhere to live either. One panel answers both.
+
+### Where it lives
+
+Inside the top-left panel, which already answers "where am I", rather than as a second floating
+card — the detail panel on the right can be open at the same time, and two cards would fight.
+The panel scrolls, and is capped at `calc(100vh - 364px)` when a story is open: the legend sits
+at `bottom: 172px` in the same column and was drawing over the prose. 364px clears a
+ten-category legend, its worst case rather than its usual one.
+
+### Reading order versus visual weight
+
+The rule from §23, now implemented: **generated prose sits above in reading order and below in
+visual weight.** The overview is what the reader came for, so it is first; it carries a label
+("Overview written by claude-opus-5 — not a source") and is set lighter than the sources
+beneath it. `StorySynthesis` keeps `overview`/`significance` separate from `sources` for the
+same reason `BakedSummary` keeps `syn` apart from `x` — merge them and the renderer can no
+longer tell the reader which is which.
+
+The coverage note gets its own treatment, marked off from body prose. It is not a disclaimer to
+skim: it is the only thing standing between a fluent paragraph and the impression that a story
+with no events on the map is a story we have covered.
+
+### An empty map now says so
+
+```
+No events in this dataset sit beneath this story, so the map has nothing to
+show for it. That is a gap in our data, not in the history.
+```
+
+Written from the whole subtree rather than the current window — a story does not become smaller
+because the timeline is looking elsewhere.
+
+### The trail is a route, not a derived path
+
+`trail: number[]`, outermost first. Containment is a DAG, so there is no single ancestry to
+recover after the fact; recording the route taken is the only way "back" can mean what the
+reader did. Re-entering a story already on the route ascends to it rather than pushing a second
+copy, because cycles do occur in Wikidata. This fixes the second defect from the recording:
+inside "Allied invasion of Sicily" the only control was "‹ All stories", with no way back to
+World War II.
+
+### Store layout
+
+One file per story under `public/data/synthesis/`, plus an `index.json` of which stories have
+one — deliberately *not* the QID-sharded layout the summary store uses. The access patterns
+differ: summaries are clicked rapidly while scanning a cluster, so a shard covering many later
+clicks pays for itself; a story is entered deliberately, one at a time, and its overview is
+~5 KB. `rejectedUrls` and `costUsd` stay in `data/raw` — provenance for us, not for the reader.
+
+### Verified on screen
+
+Soviet Union (no events, has an overview) renders the overview and the empty-map explanation;
+World War II → Second Sino-Japanese War renders the trail as `All stories › World War II`, 44
+events beneath, five sub-stories, and correctly reports that no overview has been written for
+it yet. Production build clean.
+
+Known and not fixed: timeline band labels still overlap when several sub-stories share a start
+year — visible with the Second Sino-Japanese War's children, all 1937.

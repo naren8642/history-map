@@ -1,6 +1,7 @@
 import { useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
 import { MapView, type MapApi } from './MapView.tsx';
 import { DetailPanel, GroupPanel } from './DetailPanel.tsx';
+import { StoryPanel } from './StoryPanel.tsx';
 import { Timeline, type TimeWindow } from './Timeline.tsx';
 import { useEvents } from './lib/useEvents.ts';
 import { useNarratives } from './lib/useNarratives.ts';
@@ -43,8 +44,25 @@ const NARRATIVE_BUDGET = 8;
 export function App() {
   const { events, error } = useEvents();
   const narratives = useNarratives();
-  /** The story currently entered, or null at the top level. */
-  const [story, setStory] = useState<number | null>(null);
+  /**
+   * The route into the story layer, outermost first; empty at the top level.
+   *
+   * A path, not a single id, because containment is a DAG: the Second
+   * Sino-Japanese War sits under both World War II and the Pacific War, so
+   * there is no single ancestry to derive after the fact. Recording the route
+   * taken is the only way "back" can mean what the reader did.
+   */
+  const [trail, setTrail] = useState<number[]>([]);
+  const story = trail.length > 0 ? trail[trail.length - 1]! : null;
+  const enterStory = useCallback((qid: number | null) => {
+    setTrail((current) => {
+      if (qid === null) return [];
+      // Re-entering a story already on the route ascends to it rather than
+      // pushing a second copy — cycles do occur in Wikidata.
+      const seen = current.indexOf(qid);
+      return seen === -1 ? [...current, qid] : current.slice(0, seen + 1);
+    });
+  }, []);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [viewport, setViewport] = useState({ visible: 0, zoom: 1.6, floor: 0 });
   const [window, setWindow] = useState<TimeWindow>(INITIAL_WINDOW);
@@ -75,6 +93,20 @@ export function App() {
 
   const activeStory: Narrative | null =
     story === null ? null : narrativeIndex.byQid.get(story) ?? null;
+
+  const trailNarratives = useMemo(
+    () => trail.map((q) => narrativeIndex.byQid.get(q)).filter((n): n is Narrative => Boolean(n)),
+    [trail, narrativeIndex],
+  );
+
+  /**
+   * The whole subtree, not the window. The panel is describing the story, and
+   * a story does not become smaller because the timeline is looking elsewhere.
+   */
+  const storyEventCount = useMemo(
+    () => (activeStory ? eventsUnder(narrativeIndex, activeStory.q).length : 0),
+    [activeStory, narrativeIndex],
+  );
 
   /**
    * Stories to draw: the children of whatever we are inside, or the roots at
@@ -162,37 +194,32 @@ export function App() {
         events={visibleEvents}
         narratives={visibleNarratives}
         highlightNarrative={story}
-        onSelectNarrative={setStory}
+        onSelectNarrative={enterStory}
         onMapApi={handleMapApi}
         onSelect={selectEvent}
         onSelectGroup={selectGroup}
         onViewportChange={onViewportChange}
       />
 
-      <header className="panel panel--top">
+      <header className={`panel panel--top${activeStory ? ' panel--top--story' : ''}`}>
         <h1>History Map</h1>
-        {activeStory && (
-          <div className="breadcrumb">
-            <button onClick={() => setStory(null)}>‹ All stories</button>
-            <span className="crumb-name">{activeStory.n}</span>
-            {activeStory.d && <span className="muted small crumb-desc">{activeStory.d}</span>}
-            {activeStory.via && (
-              /* Wikidata gives this story no coordinate. Say so, rather than
-                 letting an inferred pin pass for a recorded one. */
-              <span className="muted small crumb-note">
-                {activeStory.via === 'coarse'
-                  ? 'Location approximate — placed by country, not recorded'
-                  : 'Location inferred from its capital, not recorded directly'}
-              </span>
-            )}
-          </div>
-        )}
         <p className="muted small">
           {visibleEvents.length.toLocaleString()}
           {activeStory ? ' events in this story · ' : ' events in window · '}
           {viewport.visible.toLocaleString()} shown · zoom {viewport.zoom.toFixed(1)} ·
           floor {viewport.floor}
         </p>
+
+        {activeStory && (
+          <StoryPanel
+            story={activeStory}
+            trail={trailNarratives}
+            substories={narrativeIndex.childrenOf.get(activeStory.q) ?? []}
+            eventCount={storyEventCount}
+            onEnter={enterStory}
+            onAscend={(depth) => setTrail((current) => current.slice(0, depth))}
+          />
+        )}
       </header>
 
       <Legend events={visibleEvents} />
@@ -232,7 +259,7 @@ export function App() {
         bands={bandNarratives}
         activeBand={story}
         onSelectBand={(qid) => {
-          setStory(qid);
+          enterStory(qid);
           const n = narrativeIndex.byQid.get(qid);
           // Bring the window to the story, otherwise selecting a band can
           // leave the map empty because the story lies outside the window.
