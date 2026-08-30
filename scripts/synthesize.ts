@@ -234,7 +234,9 @@ function select(narratives: Narrative[], scope: Scope): Narrative[] {
   if (scope.minEvents !== undefined) pool = pool.filter((n) => n.total >= scope.minEvents!);
   pool = pool.slice().sort((a, b) => b.r - a.r);
   if (scope.top !== undefined) pool = pool.slice(0, scope.top);
-  if (scope.limit !== undefined) pool = pool.slice(0, scope.limit);
+  // `--limit` is NOT applied here: it caps the work of one run, not the scope,
+  // so it belongs after already-written stories are removed. Applying it here
+  // made `--top 100 --limit 20` re-select the same finished twenty forever.
   return pool;
 }
 
@@ -262,9 +264,13 @@ async function main(): Promise<void> {
       .filter((f) => f.endsWith('.json'))
       .map((f) => Number(f.replace('.json', ''))),
   );
-  const todo = selected.filter((n) => !done.has(n.q));
+  const remaining = selected.filter((n) => !done.has(n.q));
+  const todo = scope.limit !== undefined ? remaining.slice(0, scope.limit) : remaining;
 
-  console.log(`synthesize: ${selected.length} in scope, ${done.size} already written, ${todo.length} to do`);
+  console.log(
+    `synthesize: ${selected.length} in scope, ${done.size} already written, ` +
+      `${remaining.length} remaining${todo.length < remaining.length ? `, ${todo.length} this run (--limit)` : ''}`,
+  );
   console.log(`  budget: $${BUDGET_PER_STORY_USD.toFixed(2)}/story, $${scope.runBudget.toFixed(2)} for the run\n`);
 
   if (todo.length === 0) {
