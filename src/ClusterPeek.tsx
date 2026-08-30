@@ -10,6 +10,8 @@ export interface PeekMember {
   g: Category;
   r: number;
   s: number;
+  /** First P361 parent story, 0 when the event belongs to none. */
+  p1: number;
 }
 
 export interface PeekState {
@@ -25,6 +27,8 @@ interface Props {
   peek: PeekState;
   /** Category hue per the active skin, so the dots match the glow they describe. */
   colors: Record<Category, string>;
+  /** Story names by QID; names the thread a dot belongs to. */
+  storyNames?: Map<number, string>;
 }
 
 /**
@@ -37,7 +41,7 @@ interface Props {
  * The dated rows are the honesty mechanism: a bright blob stops being a
  * mystery number and becomes "what, when, and how much more".
  */
-export function GlowPeek({ peek, colors }: Props) {
+export function GlowPeek({ peek, colors, storyNames }: Props) {
   const shown = peek.members.slice(0, PEEK_LIMIT);
   const remaining = peek.total - shown.length;
   const years = peek.members.map((m) => m.s);
@@ -50,13 +54,19 @@ export function GlowPeek({ peek, colors }: Props) {
         {peek.total.toLocaleString()} events · {lo === hi ? formatYear(lo) : `${formatYear(lo)}–${formatYear(hi)}`}
       </p>
       <ul className="peek-list">
-        {shown.map((m) => (
-          <li key={m.q}>
-            <span className="dot" style={{ background: colors[m.g] }} />
-            <span className="peek-year">{formatYear(m.s)}</span>
-            <span className="peek-name">{m.n}</span>
-          </li>
-        ))}
+        {shown.map((m) => {
+          const story = m.p1 ? storyNames?.get(m.p1) : undefined;
+          return (
+            <li key={m.q}>
+              <span className="dot" style={{ background: colors[m.g] }} />
+              <span className="peek-year">{formatYear(m.s)}</span>
+              <span className="peek-name">
+                {m.n}
+                {story && <span className="peek-story"> · {story}</span>}
+              </span>
+            </li>
+          );
+        })}
       </ul>
       <p className="peek-more">
         {remaining > 0 ? `+${remaining.toLocaleString()} more in this glow · ` : ''}click to open

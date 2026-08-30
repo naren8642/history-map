@@ -204,9 +204,14 @@ export function createEmberLayer(
       glCtx.uniform1f(loc['u_dpr']!, Math.min(2, window.devicePixelRatio || 1));
       glCtx.uniform1f(loc['u_additive']!, skin.dark ? 1 : 0);
 
-      // Footprint grows with zoom the way the circle layers did: 1x at z2, 2.2x at z9.
+      // Footprint keeps growing with zoom: 1x at z2, 2.2x at z9, ~3.8x by z12.
+      // Without the second ramp, zooming in shrank blooms into faint dots and
+      // the field read as less significant the closer you looked.
       const zoom = mapRef.getZoom();
-      const zScale = 1 + Math.max(0, Math.min(1, (zoom - 2) / 7)) * 1.2;
+      const zScale =
+        1 +
+        Math.max(0, Math.min(1, (zoom - 2) / 7)) * 1.2 +
+        Math.max(0, Math.min(1, (zoom - 9) / 3)) * 1.6;
       glCtx.uniform1f(loc['u_world']!, 512 * Math.pow(2, zoom));
 
       glCtx.bindBuffer(glCtx.ARRAY_BUFFER, buffer);

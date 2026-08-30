@@ -224,6 +224,13 @@ export function App() {
 
   const byQid = useMemo(() => new Map(burning.map((e) => [e.q, e])), [burning]);
 
+  /** Story names by QID, for the peek card's "· World War II" suffix. */
+  const storyNames = useMemo(() => {
+    const names = new Map<number, string>();
+    for (const [q, n] of narrativeIndex.byQid) names.set(q, n.n);
+    return names;
+  }, [narrativeIndex]);
+
   const selectedEvent =
     selection?.kind === 'event' ? byQid.get(selection.qid) ?? null : null;
   const groupEvents = useMemo(() => {
@@ -269,6 +276,7 @@ export function App() {
         window={window_}
         skin={skin}
         narratives={visibleNarratives}
+        storyNames={storyNames}
         highlightNarrative={story}
         onSelectNarrative={enterStory}
         onMapApi={handleMapApi}
@@ -369,6 +377,7 @@ export function App() {
 }
 
 function Legend({ events, colors }: { events: HistoryEvent[]; colors: Record<Category, string> }) {
+  const [open, setOpen] = useState(true);
   const counts = useMemo(() => {
     const map = new Map<Category, number>();
     for (const e of events) map.set(e.g, (map.get(e.g) ?? 0) + 1);
@@ -380,13 +389,22 @@ function Legend({ events, colors }: { events: HistoryEvent[]; colors: Record<Cat
 
   return (
     <div className="panel panel--legend">
-      {counts.map(([category, count]) => (
-        <div key={category} className="legend-row">
-          <span className="swatch" style={{ background: colors[category] }} />
-          <span className="legend-label">{CATEGORY_LABEL[category]}</span>
-          <span className="muted">{count.toLocaleString()}</span>
-        </div>
-      ))}
+      <button
+        className="legend-toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        title={open ? 'Collapse the census' : 'Expand the census'}
+      >
+        Census <span className="legend-chevron">{open ? '−' : '+'}</span>
+      </button>
+      {open &&
+        counts.map(([category, count]) => (
+          <div key={category} className="legend-row">
+            <span className="swatch" style={{ background: colors[category] }} />
+            <span className="legend-label">{CATEGORY_LABEL[category]}</span>
+            <span className="muted">{count.toLocaleString()}</span>
+          </div>
+        ))}
     </div>
   );
 }

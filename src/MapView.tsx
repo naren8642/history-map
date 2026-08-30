@@ -22,8 +22,17 @@ const INITIAL_CENTER: [number, number] = [10, 30];
  */
 let savedCamera: { center: [number, number]; zoom: number } | null = null;
 
-/** Notability rank above which an event may carry a map label. */
-const LABEL_RANK = 40;
+/**
+ * Notability rank above which an event may carry a map label, by zoom. At
+ * world view only the famous get words; zooming in is how the reader asks for
+ * more, so the floor slides to zero by street level and collision becomes the
+ * only gate.
+ */
+function labelRankFor(zoom: number): number {
+  if (zoom <= 3.5) return 40;
+  if (zoom >= 9) return 0;
+  return Math.round(40 * (1 - (zoom - 3.5) / 5.5));
+}
 
 /** Pixel half-width of the hover/click probe around the cursor. */
 const PROBE = 26;
@@ -48,6 +57,8 @@ interface Props {
   window: TimeWindow;
   skin: Skin;
   narratives?: Narrative[];
+  /** Story names by QID, for naming which story an event under the probe belongs to. */
+  storyNames?: Map<number, string>;
   highlightNarrative?: number | null;
   onSelectNarrative?: (qid: number) => void;
   onMapApi?: (api: MapApi | null) => void;
@@ -66,7 +77,7 @@ type Expr = maplibregl.ExpressionSpecification;
  * buffers on every change — so they follow the clock on a debounce, not per
  * frame. See emberLayer.ts for the fast half.
  */
-function timeExpressions(window: TimeWindow) {
+function timeExpressions(window: TimeWindow, labelRank: number) {
   const to = window.to;
   const span = Math.max(4, window.to - window.from);
   const from = to - span;
@@ -83,7 +94,7 @@ function timeExpressions(window: TimeWindow) {
 
   const labelFilter = [
     'all',
-    ['>=', ['get', 'r'], LABEL_RANK],
+    ['>=', ['get', 'r'], labelRank],
     ['<=', ['get', 's'], to],
     ['>=', ['get', 's'], from],
   ] as maplibregl.FilterSpecification;
@@ -96,6 +107,7 @@ export function MapView({
   window: timeWindow,
   skin,
   narratives = [],
+  storyNames,
   highlightNarrative = null,
   onSelectNarrative,
   onMapApi,
@@ -214,51 +226,9 @@ export function MapView({
         filter: ['all', ['==', ['geometry-type'], 'Polygon'], ['==', ['get', 'q'], -1]],
         paint: { 'line-color': skin.narrative, 'line-opacity': 0.55, 'line-width': 1.1 },
       });
-      m.addLayer({
-        id: 'narrative-anchor',
-        type: 'circle',
-        source: NARRATIVE_SOURCE,
-        filter: ['==', ['geometry-type'], 'Point'],
-        paint: {
-          'circle-radius': 7,
-          'circle-color': skin.dark ? '#0b1018' : '#ffffff',
-          'circle-stroke-color': skin.narrative,
-          // A derived point is drawn thinner and a country centroid fainter
-          // still. Same hit target, visibly less assertion.
-          'circle-stroke-width': ['match', ['get', 'via'], 'coarse', 1, 'derived', 1.5, 2],
-          'circle-opacity': ['match', ['get', 'via'], 'coarse', 0.5, 'derived', 0.75, 0.95],
-        },
-      });
-      m.addLayer({
-        id: 'narrative-label',
-        type: 'symbol',
-        source: NARRATIVE_SOURCE,
-        filter: ['==', ['geometry-type'], 'Point'],
-        layout: {
-          // Set like an engraved sea name: capitals, air between the letters.
-          // The glyph stack has no serif, but spacing carries the register.
-          'text-field': skin.dark ? ['upcase', ['get', 'label']] : ['get', 'label'],
-          'text-font': ['Open Sans Semibold'],
-          'text-letter-spacing': skin.dark ? 0.28 : 0,
-          'text-size': ['interpolate', ['linear'], ['get', 'rank'], 40, 11, 300, 15],
-          'text-max-width': 12,
-          'text-offset': [0, 0.9],
-          'text-anchor': 'top',
-          // Stories are the primary navigation; they take precedence over the
-          // pins they contain. The budget of 8 keeps this from becoming clutter.
-          'text-allow-overlap': true,
-          'text-ignore-placement': true,
-        },
-        paint: {
-          'text-color': skin.dark ? '#e8eef8' : skin.narrative,
-          'text-halo-color': skin.labelHalo,
-          'text-halo-width': skin.dark ? 1.4 : 2,
-        },
-      });
-
       m.addSource(SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
 
-      const t = timeExpressions(windowRef.current);
+      const t = timeExpressions(windowRef.current, labelRankFor(m.getZoom()));
 
       // Density as luminosity at world zoom, crossfading to individual embers
       // as the dots become separable. This replaces numbered cluster bubbles
@@ -270,8 +240,10 @@ export function MapView({
         paint: {
           'heatmap-weight': t.heatWeight,
           'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 0, 0.7, 6, 1.6],
-          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 0, 14, 4, 22, 7, 30],
-          'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 0, 0.8, 4.5, 0.6, 6.5, 0],
+          // The wash survives deeper zoom than before: fading it by z6.5 made
+          // a region feel less significant the closer you looked at it.
+          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 0, 14, 4, 22, 7, 34, 9, 46],
+          'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 0, 0.8, 5, 0.6, 8.5, 0],
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
             ...skin.heat.flatMap(([stop, color]) => [stop, color]),
@@ -339,6 +311,53 @@ export function MapView({
         },
       });
 
+      /*
+       * Story anchors and names go in LAST, above the event labels. Symbol
+       * placement gives topmost layers first claim, so with collision ON a
+       * story name now displaces event labels instead of overprinting them
+       * (the Artsakh/Khojaly pile-up). Stories may still yield to each other —
+       * the anchor ring, which never collides, keeps every story findable.
+       */
+      m.addLayer({
+        id: 'narrative-anchor',
+        type: 'circle',
+        source: NARRATIVE_SOURCE,
+        filter: ['==', ['geometry-type'], 'Point'],
+        paint: {
+          'circle-radius': 7,
+          'circle-color': skin.dark ? '#0b1018' : '#ffffff',
+          'circle-stroke-color': skin.narrative,
+          // A derived point is drawn thinner and a country centroid fainter
+          // still. Same hit target, visibly less assertion.
+          'circle-stroke-width': ['match', ['get', 'via'], 'coarse', 1, 'derived', 1.5, 2],
+          'circle-opacity': ['match', ['get', 'via'], 'coarse', 0.5, 'derived', 0.75, 0.95],
+        },
+      });
+      m.addLayer({
+        id: 'narrative-label',
+        type: 'symbol',
+        source: NARRATIVE_SOURCE,
+        filter: ['==', ['geometry-type'], 'Point'],
+        layout: {
+          // Set like an engraved sea name: capitals, air between the letters.
+          // The glyph stack has no serif, but spacing carries the register.
+          'text-field': skin.dark ? ['upcase', ['get', 'label']] : ['get', 'label'],
+          'text-font': ['Open Sans Semibold'],
+          'text-letter-spacing': skin.dark ? 0.28 : 0,
+          'text-size': ['interpolate', ['linear'], ['get', 'rank'], 40, 11, 300, 15],
+          'text-max-width': 12,
+          'text-offset': [0, 0.9],
+          'text-anchor': 'top',
+          'text-padding': 6,
+          'symbol-sort-key': ['*', -1, ['get', 'rank']] as unknown as Expr,
+        },
+        paint: {
+          'text-color': skin.dark ? '#e8eef8' : skin.narrative,
+          'text-halo-color': skin.labelHalo,
+          'text-halo-width': skin.dark ? 1.4 : 2,
+        },
+      });
+
       setReady(true);
     });
 
@@ -380,7 +399,9 @@ export function MapView({
     const features = events.map((e) => ({
       type: 'Feature' as const,
       geometry: { type: 'Point' as const, coordinates: [e.c[0], e.c[1]] },
-      properties: { q: e.q, n: e.n, g: e.g, r: e.r, s: e.s },
+      // p1: the first P361 parent — enough to say which story a probed dot
+      // belongs to, without shipping the whole DAG into the tile.
+      properties: { q: e.q, n: e.n, g: e.g, r: e.r, s: e.s, p1: e.pa?.[0] ?? 0 },
     }));
     source.setData({ type: 'FeatureCollection', features } as GeoJSON);
     emberRef.current?.setEvents(events);
@@ -402,7 +423,7 @@ export function MapView({
     const applySlow = (): void => {
       if (!map.current) return;
       slowApplied.current = performance.now();
-      const t = timeExpressions(timeWindow);
+      const t = timeExpressions(timeWindow, labelRankFor(map.current.getZoom()));
       map.current.setPaintProperty('heat', 'heatmap-weight', t.heatWeight);
       map.current.setFilter('ember-labels', t.labelFilter);
     };
@@ -414,6 +435,22 @@ export function MapView({
     else slowClock.current = window.setTimeout(applySlow, 260);
     return () => window.clearTimeout(slowClock.current);
   }, [ready, timeWindow, skin]);
+
+  // Zooming changes the label budget (labelRankFor), not just the camera, so
+  // the filter is refreshed when a zoom settles.
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready) return;
+    const onZoomEnd = (): void => {
+      slowApplied.current = performance.now();
+      const t = timeExpressions(windowRef.current, labelRankFor(m.getZoom()));
+      m.setFilter('ember-labels', t.labelFilter);
+    };
+    m.on('zoomend', onZoomEnd);
+    return () => {
+      m.off('zoomend', onZoomEnd);
+    };
+  }, [ready]);
 
   // Publish narrative geometry: a hull polygon plus a label anchor per story.
   useEffect(() => {
@@ -467,7 +504,7 @@ export function MapView({
       const { from, to } = windowRef.current;
       const seen = new Map<number, PeekMember>();
       for (const f of m.queryRenderedFeatures(box, { layers: ['probe'] })) {
-        const p = f.properties as { q: number; n: string; g: Category; r: number; s: number };
+        const p = f.properties as { q: number; n: string; g: Category; r: number; s: number; p1: number };
         if (p.s > to || p.s < from) continue; // residue is context, not content
         if (!seen.has(p.q)) seen.set(p.q, p);
       }
@@ -572,7 +609,7 @@ export function MapView({
       <div ref={container} className="map" />
       {/* Cinematic falloff over the night ground; inert and skin-scoped in CSS. */}
       <div className="map-veil" aria-hidden="true" />
-      {peek && <GlowPeek peek={peek} colors={skin.glow} />}
+      {peek && <GlowPeek peek={peek} colors={skin.glow} storyNames={storyNames} />}
     </div>
   );
 }
