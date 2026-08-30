@@ -19,9 +19,12 @@
     "narratives": "tsx scripts/narratives.ts",
     "harvest:polities": "tsx scripts/harvest-polities.ts",
     "locate": "tsx scripts/locate-polities.ts",
-    "explain": "tsx scripts/explain.ts"
+    "explain": "tsx scripts/explain.ts",
+    "synthesize": "tsx scripts/synthesize.ts",
+    "check:citations": "tsx scripts/check-citations.ts"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.251",
     "@types/node": "^22.10.2",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
