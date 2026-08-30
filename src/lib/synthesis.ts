@@ -34,7 +34,7 @@ export interface StorySynthesis {
   model: string;
 }
 
-const BASE = '/data/synthesis';
+const BASE = `${import.meta.env.BASE_URL}data/synthesis`;
 
 let indexPromise: Promise<Set<number>> | null = null;
 const storyPromises = new Map<number, Promise<StorySynthesis | null>>();

@@ -6,7 +6,7 @@ import type { Narrative } from './narratives.ts';
  * pure event map when the file is missing, which is what happens before the
  * narrative pass has ever been run.
  */
-export function useNarratives(url = '/data/narratives.json'): Narrative[] | null {
+export function useNarratives(url = `${import.meta.env.BASE_URL}data/narratives.json`): Narrative[] | null {
   const [narratives, setNarratives] = useState<Narrative[] | null>(null);
 
   useEffect(() => {

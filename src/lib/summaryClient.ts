@@ -10,7 +10,7 @@
 import { type BakedSummary, type SummaryManifest } from './summaries.ts';
 import type { HistoryEvent } from '../types.ts';
 
-const STORE_BASE = '/data/summaries';
+const STORE_BASE = `${import.meta.env.BASE_URL}data/summaries`;
 const REST_BASE = 'https://en.wikipedia.org/api/rest_v1/page/summary';
 
 /**

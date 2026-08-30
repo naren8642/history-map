@@ -10,7 +10,7 @@ export interface EventsState {
  * Load the baked dataset. One static file for now; §4 of the plan splits this
  * into time buckets once the timeline exists and the corpus grows.
  */
-export function useEvents(url = '/data/events.json'): EventsState {
+export function useEvents(url = `${import.meta.env.BASE_URL}data/events.json`): EventsState {
   const [state, setState] = useState<EventsState>({ events: null, error: null });
 
   useEffect(() => {
