@@ -2,6 +2,10 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
+  // Relative base so the build works when served from a GitHub Pages
+  // project subpath (e.g. https://user.github.io/history-map/) as well
+  // as from a custom domain or local preview.
+  base: './',
   plugins: [react()],
   server: { port: 5173 },
   optimizeDeps: {
