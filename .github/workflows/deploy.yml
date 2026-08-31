@@ -82,14 +82,21 @@ jobs:
           touch dist/.nojekyll
           cd dist
           git init -q
-          git checkout -qb gh-pages
+          git remote add origin \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          # Commit each deploy onto the branch rather than replacing it, so a
+          # bad one can be diffed against its predecessor and rolled back. This
+          # costs little: the dataset is the bulk of the branch and is
+          # byte-identical between deploys, so git stores it once and every
+          # later commit reuses those blobs.
+          git fetch -q origin gh-pages
+          # --soft adopts that history while leaving the freshly built tree
+          # alone; `add -A` against the empty index then records this build
+          # exactly, including files the previous deploy had and this one drops.
+          git reset -q --soft FETCH_HEAD
           git add -A
           git \
             -c user.name='github-actions[bot]' \
             -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
             commit -q -m "Deploy ${GITHUB_SHA}"
-          # The branch is a snapshot of the current build, not a history worth
-          # keeping, so each deploy replaces it outright.
-          git push -qf \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            gh-pages
+          git push -q origin HEAD:gh-pages
