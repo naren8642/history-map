@@ -1,0 +1,95 @@
+# Builds the app and publishes it to the gh-pages branch, which GitHub Pages
+# serves at https://naren8642.github.io/history-map/.
+#
+# The dataset (public/data/events.json and public/data/summaries/) is generated
+# by `npm run data`, which re-harvests Wikidata over a long run and is therefore
+# gitignored rather than committed. CI cannot regenerate it, so this workflow
+# carries the copy already published on gh-pages forward into each new build.
+# Refreshing the dataset itself stays a local step: run `npm run data`, then run
+# this workflow — the newly built files take precedence over the carried-forward
+# ones only for paths the build actually produced, so a local `npm run data`
+# reaches the site by being pushed, not by being rebuilt here.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Pushing to gh-pages is the only write this needs.
+permissions:
+  contents: write
+
+# Never let two deploys race for the same branch; a superseded build is not
+# worth publishing.
+concurrency:
+  group: deploy-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm run build
+
+      - name: Carry the published dataset forward
+        run: |
+          set -euo pipefail
+          if ! git fetch --depth=1 origin gh-pages 2>/dev/null; then
+            echo "::error::No gh-pages branch to take the dataset from. Deploy once by hand first."
+            exit 1
+          fi
+          mkdir -p /tmp/published
+          git archive FETCH_HEAD data | tar -x -C /tmp/published
+          # -n keeps anything this build produced: only paths missing from dist
+          # (the gitignored dataset) are filled in from the live site.
+          cp -Rn /tmp/published/data/. dist/data/
+
+      - name: Check the build is servable
+        run: |
+          set -euo pipefail
+          # events.json absent renders the app as a bare "Could not load events"
+          # error, and a missing worker leaves the map a blank canvas with
+          # nothing logged. Both have shipped before; neither announces itself.
+          for path in \
+            dist/index.html \
+            dist/data/events.json \
+            dist/vendor/maplibre-gl/maplibre-gl-worker.mjs \
+            dist/vendor/maplibre-gl/maplibre-gl-shared.mjs
+          do
+            [ -s "$path" ] || { echo "::error::missing or empty: $path"; exit 1; }
+          done
+
+      - name: Publish to gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # .nojekyll stops Pages from dropping paths that begin with an
+          # underscore, which the build is free to emit.
+          touch dist/.nojekyll
+          cd dist
+          git init -q
+          git checkout -qb gh-pages
+          git add -A
+          git \
+            -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m "Deploy ${GITHUB_SHA}"
+          # The branch is a snapshot of the current build, not a history worth
+          # keeping, so each deploy replaces it outright.
+          git push -qf \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            gh-pages
